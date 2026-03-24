@@ -316,6 +316,23 @@ int utf_collate_cmp(const unsigned char *a, size_t nA,
     int nCEsB = CollectCEs(b, nB, cesB, MAX_SORT_CES);
     int iA, iB;
 
+    /* Level 1: primary. */
+    iA = 0; iB = 0;
+    for (;;) {
+        while (iA < nCEsA && 0 == CE_PRIMARY(cesA[iA])) iA++;
+        while (iB < nCEsB && 0 == CE_PRIMARY(cesB[iB])) iB++;
+        if (iA >= nCEsA || iB >= nCEsB) break;
+        unsigned short pA = CE_PRIMARY(cesA[iA]);
+        unsigned short pB = CE_PRIMARY(cesB[iB]);
+        if (pA < pB) return -1;
+        if (pA > pB) return 1;
+        iA++; iB++;
+    }
+    while (iA < nCEsA && 0 == CE_PRIMARY(cesA[iA])) iA++;
+    while (iB < nCEsB && 0 == CE_PRIMARY(cesB[iB])) iB++;
+    if (iA < nCEsA) return 1;
+    if (iB < nCEsB) return -1;
+
     /* Level 2: secondary. */
     iA = 0; iB = 0;
     for (;;) {
