@@ -188,45 +188,120 @@ static void ImplicitWeight(uint32_t cp, unsigned short *aaaa, unsigned short *bb
     *bbbb = (unsigned short)((cp & 0x7FFF) | 0x8000);
 }
 
-/* --- CE collection --- */
+/* --- Per-codepoint CE extraction --- */
 
-static int CollectCEs(const unsigned char *src, size_t nSrc,
+/* Extract CEs for the next code point (or contraction) at *pp.
+ * Advances *pp past the consumed input bytes.
+ * Returns number of CEs written to ces[].
+ */
+static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
                       uint32_t *ces, int maxCEs)
 {
-    const unsigned char *p = src;
-    const unsigned char *pEnd = src + nSrc;
+    const unsigned char *p = *pp;
     int nCEs = 0;
 
-    while (p < pEnd && nCEs < maxCEs) {
-        const unsigned char *pNext = utf8_advance_c(p, pEnd);
-        int ceIndex = 0;
-        const unsigned char *pConsumed = pNext;
-
-        if (pNext < pEnd) {
-            const unsigned char *pNext2 = utf8_advance_c(pNext, pEnd);
-            ceIndex = GetContraction(p, pNext, pNext, pNext2);
-            if (0 != ceIndex) pConsumed = pNext2;
-        }
-
-        if (0 == ceIndex) ceIndex = GetDUCET(p, pNext);
-
+    /* ASCII fast path: no contractions, single-byte DUCET lookup. */
+    if (*p < 0x80) {
+        int ceIndex = GetDUCET(p, p + 1);
         if (0 != ceIndex) {
             int start = ducet_ce_offset[ceIndex];
             int end   = ducet_ce_offset[ceIndex + 1];
             for (int i = start; i < end && nCEs < maxCEs; i++)
                 ces[nCEs++] = ducet_ce_weights[i];
         } else {
-            uint32_t cp = utf8_decode_c(p, pNext);
-            if (UNI_EOF != cp) {
-                unsigned short aaaa, bbbb;
-                ImplicitWeight(cp, &aaaa, &bbbb);
-                if (nCEs < maxCEs)
-                    ces[nCEs++] = ((uint32_t)aaaa << 16) | ((uint32_t)0x0020 << 5) | 0x0002;
-                if (nCEs < maxCEs)
-                    ces[nCEs++] = (uint32_t)bbbb << 16;
+            unsigned short aaaa, bbbb;
+            ImplicitWeight((uint32_t)*p, &aaaa, &bbbb);
+            if (nCEs < maxCEs)
+                ces[nCEs++] = ((uint32_t)aaaa << 16) | ((uint32_t)0x0020 << 5) | 0x0002;
+            if (nCEs < maxCEs)
+                ces[nCEs++] = (uint32_t)bbbb << 16;
+        }
+        *pp = p + 1;
+        return nCEs;
+    }
+
+    /* Non-ASCII: advance, try contraction, then single-cp DUCET. */
+    const unsigned char *pNext = utf8_advance_c(p, pEnd);
+    int ceIndex = 0;
+    const unsigned char *pConsumed = pNext;
+
+    if (pNext < pEnd) {
+        const unsigned char *pNext2 = utf8_advance_c(pNext, pEnd);
+        ceIndex = GetContraction(p, pNext, pNext, pNext2);
+        if (0 != ceIndex) pConsumed = pNext2;
+    }
+
+    if (0 == ceIndex) ceIndex = GetDUCET(p, pNext);
+
+    if (0 != ceIndex) {
+        int start = ducet_ce_offset[ceIndex];
+        int end   = ducet_ce_offset[ceIndex + 1];
+        for (int i = start; i < end && nCEs < maxCEs; i++)
+            ces[nCEs++] = ducet_ce_weights[i];
+    } else {
+        uint32_t cp = utf8_decode_c(p, pNext);
+        if (UNI_EOF != cp) {
+            unsigned short aaaa, bbbb;
+            ImplicitWeight(cp, &aaaa, &bbbb);
+            if (nCEs < maxCEs)
+                ces[nCEs++] = ((uint32_t)aaaa << 16) | ((uint32_t)0x0020 << 5) | 0x0002;
+            if (nCEs < maxCEs)
+                ces[nCEs++] = (uint32_t)bbbb << 16;
+        }
+    }
+    *pp = pConsumed;
+    return nCEs;
+}
+
+/* --- ASCII CE cache --- */
+
+/* Precomputed CE for each ASCII byte.  Most printable ASCII characters
+ * have exactly one CE in DUCET.  A value of 0 means "use slow path".
+ */
+static uint32_t s_ascii_ce[128];
+static int      s_ascii_ce_init;
+
+static void InitASCIICache(void)
+{
+    for (int i = 0; i < 128; i++) {
+        unsigned char byte = (unsigned char)i;
+        int idx = GetDUCET(&byte, &byte + 1);
+        if (0 != idx) {
+            int start = ducet_ce_offset[idx];
+            int end   = ducet_ce_offset[idx + 1];
+            if (end - start == 1) {
+                s_ascii_ce[i] = ducet_ce_weights[start];
+                continue;
             }
         }
-        p = pConsumed;
+        s_ascii_ce[i] = 0;
+    }
+    s_ascii_ce_init = 1;
+}
+
+/* --- CE collection (full string) --- */
+
+static int CollectCEs(const unsigned char *src, size_t nSrc,
+                      uint32_t *ces, int maxCEs)
+{
+    if (!s_ascii_ce_init) InitASCIICache();
+
+    const unsigned char *p = src;
+    const unsigned char *pEnd = src + nSrc;
+    int nCEs = 0;
+
+    while (p < pEnd && nCEs < maxCEs) {
+        /* ASCII fast path: single table lookup, no DFA. */
+        if (*p < 0x80) {
+            uint32_t ce = s_ascii_ce[*p];
+            if (0 != ce) {
+                ces[nCEs++] = ce;
+                p++;
+                continue;
+            }
+            /* Rare: ASCII with 0 or multiple CEs — fall through. */
+        }
+        nCEs += ExtractCEs(&p, pEnd, ces + nCEs, maxCEs - nCEs);
     }
     return nCEs;
 }
@@ -240,23 +315,6 @@ int utf_collate_cmp(const unsigned char *a, size_t nA,
     int nCEsA = CollectCEs(a, nA, cesA, MAX_SORT_CES);
     int nCEsB = CollectCEs(b, nB, cesB, MAX_SORT_CES);
     int iA, iB;
-
-    /* Level 1: primary. */
-    iA = 0; iB = 0;
-    for (;;) {
-        while (iA < nCEsA && 0 == CE_PRIMARY(cesA[iA])) iA++;
-        while (iB < nCEsB && 0 == CE_PRIMARY(cesB[iB])) iB++;
-        if (iA >= nCEsA || iB >= nCEsB) break;
-        unsigned short pA = CE_PRIMARY(cesA[iA]);
-        unsigned short pB = CE_PRIMARY(cesB[iB]);
-        if (pA < pB) return -1;
-        if (pA > pB) return 1;
-        iA++; iB++;
-    }
-    while (iA < nCEsA && 0 == CE_PRIMARY(cesA[iA])) iA++;
-    while (iB < nCEsB && 0 == CE_PRIMARY(cesB[iB])) iB++;
-    if (iA < nCEsA) return 1;
-    if (iB < nCEsB) return -1;
 
     /* Level 2: secondary. */
     iA = 0; iB = 0;

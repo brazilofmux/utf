@@ -32,8 +32,11 @@
 
 #define UTF8_CONTINUE 5
 
-/* Maximum code points in normalization buffer. */
-#define NFC_MAX_CODEPOINTS (UTF_BUFSIZE * 2)
+/* Maximum code points per normalization segment.
+ * A segment is one combining character sequence (starter + combiners).
+ * 128 is generous — real sequences rarely exceed ~10 code points.
+ */
+#define NFC_SEG_MAX 128
 
 typedef struct {
     uint32_t cp;
@@ -402,72 +405,42 @@ static void CanonicalCompose(NFCCodePoint *buf, int *n)
     }
 }
 
-/* --- Public API --- */
+/* --- UTF-8 validation helper --- */
 
-int utf_nfc_is_nfc(const unsigned char *src, size_t nSrc)
+/* Return byte length of a valid UTF-8 code point at p, or 0 if invalid. */
+static int utf8_cplen(const unsigned char *p, const unsigned char *pEnd)
 {
-    const unsigned char *p = src;
-    const unsigned char *pEnd = src + nSrc;
-    int lastCCC = 0;
-
-    while (p < pEnd) {
-        const unsigned char *pStart = p;
-        int n = utf8_FirstByte[*p];
-        if (n <= 0 || n >= UTF8_CONTINUE) return 0;
-        if (p + n > pEnd) return 0;
-        for (int i = 1; i < n; i++) {
-            if (UTF8_CONTINUE != utf8_FirstByte[p[i]]) return 0;
-        }
-
-        uint32_t cp = utf8_decode_raw(p, n);
-        if (!utf8_is_valid_scalar(cp, n)) return 0;
-
-        int qc = GetNFCQC(pStart, pStart + n);
-        if (1 == qc) return 0;  /* No */
-
-        int ccc = GetCCC(pStart, pStart + n);
-        if (ccc != 0 && lastCCC > ccc) return 0;
-
-        if (2 == qc) return 0;  /* Maybe */
-
-        lastCCC = ccc;
-        p = pStart + n;
+    int n = utf8_FirstByte[*p];
+    if (n <= 0 || n >= UTF8_CONTINUE || p + n > pEnd) return 0;
+    for (int i = 1; i < n; i++) {
+        if (UTF8_CONTINUE != utf8_FirstByte[p[i]]) return 0;
     }
-    return 1;
+    uint32_t cp = utf8_decode_raw(p, n);
+    return utf8_is_valid_scalar(cp, n) ? n : 0;
 }
 
-void utf_nfc_normalize(const unsigned char *src, size_t nSrc,
-                       unsigned char *dst, size_t nDstMax, size_t *pnDst)
+/* --- Segment normalizer --- */
+
+/* Normalize a single combining character sequence into dst.
+ * Returns bytes written.
+ */
+static size_t NormalizeSegment(const unsigned char *src, size_t nSrc,
+                               unsigned char *dst, size_t nDstMax)
 {
-    *pnDst = 0;
-
-    /* Quick check: if already NFC, just copy. */
-    if (utf_nfc_is_nfc(src, nSrc)) {
-        size_t nCopy = (nSrc < nDstMax) ? nSrc : nDstMax;
-        memcpy(dst, src, nCopy);
-        *pnDst = nCopy;
-        return;
-    }
-
-    /* Step 1: Decompose all code points to NFD. */
-    NFCCodePoint cps[NFC_MAX_CODEPOINTS];
+    NFCCodePoint cps[NFC_SEG_MAX];
     int nCps = 0;
 
     const unsigned char *p = src;
     const unsigned char *pEnd = src + nSrc;
-    while (p < pEnd && nCps < NFC_MAX_CODEPOINTS) {
+    while (p < pEnd && nCps < NFC_SEG_MAX) {
         uint32_t cp = utf8_Decode(&p, pEnd);
         if (UNI_EOF == cp) continue;
-        DecomposeOne(cp, cps, &nCps, NFC_MAX_CODEPOINTS);
+        DecomposeOne(cp, cps, &nCps, NFC_SEG_MAX);
     }
 
-    /* Step 2: Canonical ordering. */
     CanonicalOrder(cps, nCps);
-
-    /* Step 3: Canonical composition. */
     CanonicalCompose(cps, &nCps);
 
-    /* Step 4: Encode back to UTF-8. */
     size_t nOut = 0;
     for (int i = 0; i < nCps; i++) {
         unsigned char enc[4];
@@ -477,5 +450,124 @@ void utf_nfc_normalize(const unsigned char *src, size_t nSrc,
             nOut += nb;
         }
     }
+    return nOut;
+}
+
+/* --- Public API --- */
+
+int utf_nfc_is_nfc(const unsigned char *src, size_t nSrc)
+{
+    const unsigned char *p = src;
+    const unsigned char *pEnd = src + nSrc;
+    int lastCCC = 0;
+
+    while (p < pEnd) {
+        /* ASCII fast path: always NFC_QC=Yes, CCC=0. */
+        if (*p < 0x80) {
+            lastCCC = 0;
+            p++;
+            continue;
+        }
+
+        int n = utf8_cplen(p, pEnd);
+        if (0 == n) return 0;
+
+        int qc = GetNFCQC(p, p + n);
+        if (0 != qc) return 0;  /* No or Maybe */
+
+        int ccc = GetCCC(p, p + n);
+        if (ccc != 0 && lastCCC > ccc) return 0;
+
+        lastCCC = ccc;
+        p += n;
+    }
+    return 1;
+}
+
+void utf_nfc_normalize(const unsigned char *src, size_t nSrc,
+                       unsigned char *dst, size_t nDstMax, size_t *pnDst)
+{
+    *pnDst = 0;
+    const unsigned char *p = src;
+    const unsigned char *pEnd = src + nSrc;
+    size_t nOut = 0;
+
+    const unsigned char *copyFrom = src;    /* start of unwritten clean data */
+    const unsigned char *lastStarter = src; /* last CCC=0 position in clean run */
+    int lastCCC = 0;
+
+    while (p < pEnd) {
+        /* ASCII fast path: CCC=0, NFC_QC=Yes. */
+        if (*p < 0x80) {
+            lastStarter = p;
+            lastCCC = 0;
+            p++;
+            continue;
+        }
+
+        int n = utf8_cplen(p, pEnd);
+        if (0 == n) {
+            /* Invalid UTF-8: skip byte, reset CCC tracking. */
+            p++;
+            lastCCC = 0;
+            continue;
+        }
+
+        int qc = GetNFCQC(p, p + n);
+        int ccc = GetCCC(p, p + n);
+
+        if (0 == qc && (0 == ccc || lastCCC <= ccc)) {
+            /* Clean code point — pass through. */
+            if (0 == ccc) lastStarter = p;
+            lastCCC = ccc;
+            p += n;
+            continue;
+        }
+
+        /* NFC violation. Dirty segment starts at lastStarter. */
+
+        /* Copy clean prefix [copyFrom, lastStarter) to output. */
+        size_t cleanLen = (size_t)(lastStarter - copyFrom);
+        if (cleanLen > 0 && nOut + cleanLen <= nDstMax) {
+            memcpy(dst + nOut, copyFrom, cleanLen);
+            nOut += cleanLen;
+        }
+
+        /* Skip past the problem code point. */
+        p += n;
+
+        /* Scan forward to find the end of the dirty segment:
+         * the next starter (CCC=0) with NFC_QC=Yes.
+         */
+        while (p < pEnd) {
+            if (*p < 0x80) break;  /* ASCII = clean starter */
+            int n2 = utf8_cplen(p, pEnd);
+            if (0 == n2) { p++; continue; }
+            int ccc2 = GetCCC(p, p + n2);
+            if (0 == ccc2) {
+                int qc2 = GetNFCQC(p, p + n2);
+                if (0 == qc2) break;  /* Clean starter: end of dirty segment */
+            }
+            p += n2;
+        }
+
+        /* Normalize [lastStarter, p). */
+        size_t segLen = (size_t)(p - lastStarter);
+        nOut += NormalizeSegment(lastStarter, segLen,
+                                dst + nOut,
+                                (nOut < nDstMax) ? nDstMax - nOut : 0);
+
+        copyFrom = p;
+        lastStarter = p;
+        lastCCC = 0;
+    }
+
+    /* Copy remaining clean tail. */
+    size_t tailLen = (size_t)(pEnd - copyFrom);
+    if (tailLen > 0 && nOut + tailLen <= nDstMax) {
+        memcpy(dst + nOut, copyFrom, tailLen);
+        nOut += tailLen;
+    }
+
     *pnDst = nOut;
 }

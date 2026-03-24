@@ -24,18 +24,30 @@ cd utf && make && make test
 
 ## Performance vs ICU 74.2
 
-Benchmarks on the same machine, same test data (`bench/`):
+Benchmarks on the same machine, same test data (`bench/`).  Two
+scenarios: **UTF-8 input** (libutf native — no conversion) and
+**UTF-16 input** (ICU native — no conversion).
+
+### UTF-8 input (the common case)
 
 | Operation | libutf | ICU 74.2 | Ratio |
 |-----------|--------|----------|-------|
 | Grapheme segmentation | 948 ms | 5,704 ms | **6.0x faster** |
 | Case mapping (toupper) | 1,017 ms | 1,216 ms | **1.2x faster** |
-| DUCET collation | 489 ms | 307 ms | ICU 1.6x faster |
-| NFC normalization | 1,267 ms | 469 ms | ICU 2.7x faster |
+| NFC normalization | 97 ms | 122 ms | **1.3x faster** |
+| DUCET collation | 165 ms | 197 ms | **1.2x faster** |
 
-ICU wins on NFC and collation where it has decades of specialized
-UTF-16 fast-path optimization.  libutf wins on byte-walking operations
-where the DFA processes UTF-8 directly without conversion.
+### Core-to-core (each library in its native encoding)
+
+| Operation | libutf (UTF-8) | ICU (UTF-16) | Ratio |
+|-----------|----------------|--------------|-------|
+| NFC normalization | 97 ms | 94 ms | **~parity** |
+| DUCET collation | 165 ms | 112 ms | ICU 1.5x faster |
+
+When both libraries work in their native encoding, NFC is at parity.
+ICU's collation engine still wins core-to-core thanks to its
+specialized fast-Latin comparison path, but that advantage disappears
+when the caller's data is UTF-8.
 
 ## Size
 

@@ -1,6 +1,13 @@
 /*
  * bench_nfc.c — NFC normalization benchmark: libutf vs ICU.
  *
+ * Two scenarios:
+ *   1. UTF-8 input (libutf's native format)
+ *   2. UTF-16 input (ICU's native format)
+ *
+ * In each scenario, the non-native library pays for conversion.
+ * This gives a fair picture of where each library wins.
+ *
  * Build:
  *   gcc -O2 -I../include -o bench_nfc bench_nfc.c -L.. -lutf -lm \
  *       $(pkg-config --cflags --libs icu-uc)
@@ -53,25 +60,6 @@ static double now_sec(void)
 int main(int argc, char **argv)
 {
     int iterations = (argc > 1) ? atoi(argv[1]) : 100000;
-
-    printf("NFC Normalization Benchmark\n");
-    printf("Iterations: %d per string, %d strings\n\n", iterations, nStrings);
-
-    /* --- libutf --- */
-    unsigned char dst[8192];
-    size_t nDst;
-    double t0 = now_sec();
-    for (int iter = 0; iter < iterations; iter++) {
-        for (int s = 0; s < nStrings; s++) {
-            const unsigned char *src = (const unsigned char *)test_strings[s];
-            size_t len = strlen(test_strings[s]);
-            utf_nfc_normalize(src, len, dst, sizeof(dst), &nDst);
-        }
-    }
-    double t1 = now_sec();
-    double libutf_ms = (t1 - t0) * 1000.0;
-
-    /* --- ICU --- */
     UErrorCode err = U_ZERO_ERROR;
     const UNormalizer2 *norm = unorm2_getNFCInstance(&err);
     if (U_FAILURE(err)) {
@@ -79,35 +67,105 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    unsigned char dst8[8192];
     UChar usrc[8192], udst[8192];
     int32_t usrcLen, udstLen;
+    size_t nDst;
 
+    /* Pre-convert test strings to UTF-16 for Scenario 2. */
+    UChar  u16_strings[10][512];
+    int32_t u16_lens[10];
+    size_t utf8_lens[10];
+    for (int s = 0; s < nStrings; s++) {
+        utf8_lens[s] = strlen(test_strings[s]);
+        u_strFromUTF8(u16_strings[s], 512, &u16_lens[s],
+                      test_strings[s], (int32_t)utf8_lens[s], &err);
+    }
+
+    printf("NFC Normalization Benchmark\n");
+    printf("Iterations: %d per string, %d strings\n", iterations, nStrings);
+
+    /* ================================================================
+     * Scenario 1: UTF-8 input (libutf native, ICU pays for conversion)
+     * ================================================================ */
+    printf("\n--- Scenario 1: UTF-8 input ---\n");
+
+    /* libutf: UTF-8 in, UTF-8 out (native). */
+    double t0 = now_sec();
+    for (int iter = 0; iter < iterations; iter++) {
+        for (int s = 0; s < nStrings; s++) {
+            utf_nfc_normalize((const unsigned char *)test_strings[s],
+                              utf8_lens[s], dst8, sizeof(dst8), &nDst);
+        }
+    }
+    double t1 = now_sec();
+    double libutf_utf8 = (t1 - t0) * 1000.0;
+
+    /* ICU: UTF-8 -> UTF-16 -> normalize -> UTF-16 result. */
     t0 = now_sec();
     for (int iter = 0; iter < iterations; iter++) {
         for (int s = 0; s < nStrings; s++) {
-            /* Convert UTF-8 -> UTF-16 for ICU. */
             u_strFromUTF8(usrc, 8192, &usrcLen,
-                          test_strings[s], (int32_t)strlen(test_strings[s]), &err);
-            /* Normalize. */
+                          test_strings[s], (int32_t)utf8_lens[s], &err);
             udstLen = unorm2_normalize(norm, usrc, usrcLen, udst, 8192, &err);
-            /* Convert back to UTF-8 for fair comparison. */
-            u_strToUTF8((char *)dst, 8192, NULL, udst, udstLen, &err);
         }
     }
     t1 = now_sec();
-    double icu_ms = (t1 - t0) * 1000.0;
+    double icu_utf8 = (t1 - t0) * 1000.0;
 
-    printf("%-20s %10.1f ms\n", "libutf", libutf_ms);
-    printf("%-20s %10.1f ms\n", "ICU 74.2", icu_ms);
-    printf("%-20s %10.1fx\n", "Speedup", icu_ms / libutf_ms);
+    printf("  %-20s %10.1f ms\n", "libutf (native)", libutf_utf8);
+    printf("  %-20s %10.1f ms\n", "ICU (convert+norm)", icu_utf8);
+    if (icu_utf8 >= libutf_utf8)
+        printf("  %-20s %10.1fx faster\n", "libutf", icu_utf8 / libutf_utf8);
+    else
+        printf("  %-20s %10.1fx faster\n", "ICU", libutf_utf8 / icu_utf8);
 
-    printf("\n--- Size comparison ---\n");
-    printf("libutf.a (stripped):     670 KB\n");
-    printf("libicuuc.a:            4,067 KB\n");
-    printf("libicui18n.a:          8,197 KB\n");
-    printf("libicudata.a:         30,062 KB\n");
-    printf("ICU total (uc+i18n+data): 42,326 KB\n");
-    printf("Size ratio:              ~63x\n");
+    /* ================================================================
+     * Scenario 2: UTF-16 input (ICU native, libutf pays for conversion)
+     * ================================================================ */
+    printf("\n--- Scenario 2: UTF-16 input ---\n");
+
+    /* ICU: UTF-16 in, UTF-16 out (native). */
+    t0 = now_sec();
+    for (int iter = 0; iter < iterations; iter++) {
+        for (int s = 0; s < nStrings; s++) {
+            udstLen = unorm2_normalize(norm, u16_strings[s], u16_lens[s],
+                                       udst, 8192, &err);
+        }
+    }
+    t1 = now_sec();
+    double icu_utf16 = (t1 - t0) * 1000.0;
+
+    /* libutf: UTF-16 -> UTF-8 -> normalize -> UTF-8 result. */
+    t0 = now_sec();
+    for (int iter = 0; iter < iterations; iter++) {
+        for (int s = 0; s < nStrings; s++) {
+            int32_t u8len;
+            u_strToUTF8((char *)dst8, 8192, &u8len,
+                        u16_strings[s], u16_lens[s], &err);
+            utf_nfc_normalize(dst8, (size_t)u8len,
+                              dst8 + 4096, 4096, &nDst);
+        }
+    }
+    t1 = now_sec();
+    double libutf_utf16 = (t1 - t0) * 1000.0;
+
+    printf("  %-20s %10.1f ms\n", "ICU (native)", icu_utf16);
+    printf("  %-20s %10.1f ms\n", "libutf (convert+norm)", libutf_utf16);
+    if (icu_utf16 >= libutf_utf16)
+        printf("  %-20s %10.1fx faster\n", "libutf", icu_utf16 / libutf_utf16);
+    else
+        printf("  %-20s %10.1fx faster\n", "ICU", libutf_utf16 / icu_utf16);
+
+    printf("\n--- Summary ---\n");
+    printf("  libutf NFC (UTF-8 native):    %8.1f ms\n", libutf_utf8);
+    printf("  ICU NFC (UTF-16 native):      %8.1f ms\n", icu_utf16);
+    if (icu_utf16 >= libutf_utf8)
+        printf("  Core-to-core:                  libutf %.1fx faster\n",
+               icu_utf16 / libutf_utf8);
+    else
+        printf("  Core-to-core:                  ICU %.1fx faster\n",
+               libutf_utf8 / icu_utf16);
 
     return 0;
 }
