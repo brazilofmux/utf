@@ -7,3 +7,4 @@ examples/sort_lines
 examples/nearest_color
 examples/strip_color
 examples/nfc_check
+bench/bench_nfc\nbench/bench_nfc_quickcheck\nbench/bench_collate\nbench/bench_toupper\nbench/bench_grapheme
