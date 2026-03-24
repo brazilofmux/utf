@@ -8,6 +8,7 @@
  */
 
 #include "utf/collate.h"
+#include "utf/nfc.h"
 #include "utf/utf_tables.h"
 #include <string.h>
 #include <stdint.h>
@@ -367,12 +368,34 @@ int utf_collate_cmp(const unsigned char *a, size_t nA,
     if (iA < nCEsA) return 1;
     if (iB < nCEsB) return -1;
 
-    /* Tiebreaker: binary. */
-    size_t nMin = (nA < nB) ? nA : nB;
-    int cmp = memcmp(a, b, nMin);
+    /* Tiebreaker: binary comparison of NFC-normalized forms.
+     * UCA requires canonical equivalents to compare equal.  Levels 1-3
+     * already handle this (CEs are identical for equivalent forms), but
+     * the tiebreaker must also use normalized bytes so that decomposed
+     * and precomposed forms don't diverge here.
+     *
+     * We defer normalization to this point because most comparisons
+     * resolve at levels 1-3 and never reach the tiebreaker.
+     */
+    unsigned char nfcBufA[UTF_BUFSIZE], nfcBufB[UTF_BUFSIZE];
+    const unsigned char *tieA = a;
+    const unsigned char *tieB = b;
+    size_t tieNA = nA, tieNB = nB;
+
+    if (!utf_nfc_is_nfc(a, nA)) {
+        utf_nfc_normalize(a, nA, nfcBufA, sizeof(nfcBufA), &tieNA);
+        tieA = nfcBufA;
+    }
+    if (!utf_nfc_is_nfc(b, nB)) {
+        utf_nfc_normalize(b, nB, nfcBufB, sizeof(nfcBufB), &tieNB);
+        tieB = nfcBufB;
+    }
+
+    size_t nMin = (tieNA < tieNB) ? tieNA : tieNB;
+    int cmp = memcmp(tieA, tieB, nMin);
     if (0 != cmp) return cmp;
-    if (nA < nB) return -1;
-    if (nA > nB) return 1;
+    if (tieNA < tieNB) return -1;
+    if (tieNA > tieNB) return 1;
     return 0;
 }
 
