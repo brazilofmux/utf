@@ -19,8 +19,10 @@ LIB_SRCS = src/color_ops.c \
            src/cie97.c \
            src/console_width.c \
            src/grapheme.c \
+           src/nfc.c \
            tables/unicode_tables.c \
            tables/unicode_tables_ext.c \
+           tables/nfc_tables.c \
            tables/charset_tables.c \
            tables/xterm_palette.c
 
