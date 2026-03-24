@@ -1,0 +1,5 @@
+*.o
+*.a
+*.so
+*.dylib
+tests/test_color_ops
