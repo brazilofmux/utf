@@ -221,11 +221,18 @@ void BuildAndOutputTable(FILE *fp, FILE *fpBody, FILE *fpInclude, char *UpperPre
     LoadPairs(fp, fpBody, fpInclude);
     TestTable(fp);
 
-    if (g_bDefault)
-    {
-        sm.SetUndefinedStates(g_iDefaultState);
-        TestTable(fp);
-    }
+    // Pairs DFAs must always resolve undefined transitions before
+    // optimization.  RowsEqual() and MergeAcceptingStates() treat
+    // m_Undefined as "don't care", which is correct for single-
+    // codepoint DFAs (undefined = invalid UTF-8 continuation) but
+    // wrong for pairs DFAs (undefined = no composition pair exists).
+    //
+    // Setting undefined to the default accepting state (0 = no match,
+    // or whatever -d specified) makes them concrete so the optimizers
+    // compare actual values rather than wildcards.
+    //
+    sm.SetUndefinedStates(g_bDefault ? g_iDefaultState : 0);
+    TestTable(fp);
 
     sm.MergeAcceptingStates();
     TestTable(fp);

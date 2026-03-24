@@ -126,10 +126,10 @@ extern UTF_API const co_string_desc tr_nfd_ott[2045];
 
 /* tr_nfc_compose: NFC composition (pair DFA) */
 #define TR_NFC_COMPOSE_START_STATE (0)
-#define TR_NFC_COMPOSE_ACCEPTING_STATES_START (129)
+#define TR_NFC_COMPOSE_ACCEPTING_STATES_START (1010)
 extern UTF_API const unsigned char  tr_nfc_compose_itt[256];
-extern UTF_API const unsigned short tr_nfc_compose_sot[129];
-extern UTF_API const unsigned short tr_nfc_compose_sbt[3539];
+extern UTF_API const unsigned short tr_nfc_compose_sot[1010];
+extern UTF_API const unsigned short tr_nfc_compose_sbt[8364];
 #define TR_NFC_COMPOSE_NFC_COMPOSE_RESULTS (964)
 extern UTF_API const uint32_t tr_nfc_compose_nfc_compose_result[965];
 
@@ -144,10 +144,10 @@ extern UTF_API const unsigned short tr_ducet_sbt[43141];
 
 /* tr_ducet_contract: two-code-point contraction -> CE index */
 #define TR_DUCET_CONTRACT_START_STATE (0)
-#define TR_DUCET_CONTRACT_ACCEPTING_STATES_START (27)
+#define TR_DUCET_CONTRACT_ACCEPTING_STATES_START (294)
 extern UTF_API const unsigned char  tr_ducet_contract_itt[256];
-extern UTF_API const unsigned short tr_ducet_contract_sot[27];
-extern UTF_API const unsigned short tr_ducet_contract_sbt[1464];
+extern UTF_API const unsigned short tr_ducet_contract_sot[294];
+extern UTF_API const unsigned short tr_ducet_contract_sbt[2813];
 #define TR_DUCET_CONTRACT_NFC_COMPOSE_RESULTS (953)
 extern UTF_API const uint32_t tr_ducet_contract_nfc_compose_result[954];
 
