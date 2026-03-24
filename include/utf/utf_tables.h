@@ -133,6 +133,29 @@ extern UTF_API const unsigned short tr_nfc_compose_sbt[3539];
 #define TR_NFC_COMPOSE_NFC_COMPOSE_RESULTS (964)
 extern UTF_API const uint32_t tr_nfc_compose_nfc_compose_result[965];
 
+/* ---- DUCET collation DFAs ---- */
+
+/* tr_ducet: single code point -> CE index */
+#define TR_DUCET_START_STATE (0)
+#define TR_DUCET_ACCEPTING_STATES_START (702)
+extern UTF_API const unsigned char  tr_ducet_itt[256];
+extern UTF_API const unsigned short tr_ducet_sot[702];
+extern UTF_API const unsigned short tr_ducet_sbt[43141];
+
+/* tr_ducet_contract: two-code-point contraction -> CE index */
+#define TR_DUCET_CONTRACT_START_STATE (0)
+#define TR_DUCET_CONTRACT_ACCEPTING_STATES_START (27)
+extern UTF_API const unsigned char  tr_ducet_contract_itt[256];
+extern UTF_API const unsigned short tr_ducet_contract_sot[27];
+extern UTF_API const unsigned short tr_ducet_contract_sbt[1464];
+#define TR_DUCET_CONTRACT_NFC_COMPOSE_RESULTS (953)
+extern UTF_API const uint32_t tr_ducet_contract_nfc_compose_result[954];
+
+/* DUCET CE weight/offset tables (from ducet_cetable) */
+#define DUCET_CE_SEQUENCES 35505
+extern const unsigned short ducet_ce_offset[35507];
+extern const uint32_t ducet_ce_weights[];
+
 /* ---- Charset approximation DFAs ---- */
 
 /* tr_ascii: UTF-8 to ASCII approximation */
