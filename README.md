@@ -2,7 +2,7 @@
 
 A grab-and-go Unicode library built on compressed DFAs and Ragel -G2
 state machines.  Processes UTF-8 directly — no conversion to UTF-16
-and back.  No malloc.  No dependencies.  670 KB.
+and back.  No malloc.  No dependencies.  586 KB.
 
 Unicode 16.0.  MIT licensed.
 
@@ -26,36 +26,59 @@ cd utf && make && make test
 
 Benchmarks on the same machine, same test data (`bench/`).  Two
 scenarios: **UTF-8 input** (libutf native — no conversion) and
-**UTF-16 input** (ICU native — no conversion).
+**core-to-core** (each library in its native encoding).
 
 ### UTF-8 input (the common case)
 
 | Operation | libutf | ICU 74.2 | Ratio |
 |-----------|--------|----------|-------|
 | Grapheme segmentation | 948 ms | 5,704 ms | **6.0x faster** |
+| NFC normalization | 251 ms | 359 ms | **1.4x faster** |
 | Case mapping (toupper) | 1,017 ms | 1,216 ms | **1.2x faster** |
-| NFC normalization | 97 ms | 122 ms | **1.3x faster** |
-| DUCET collation | 165 ms | 197 ms | **1.2x faster** |
+| DUCET collation | 361 ms | 296 ms | ICU 1.2x faster |
 
 ### Core-to-core (each library in its native encoding)
 
 | Operation | libutf (UTF-8) | ICU (UTF-16) | Ratio |
 |-----------|----------------|--------------|-------|
-| NFC normalization | 97 ms | 94 ms | **~parity** |
-| DUCET collation | 165 ms | 112 ms | ICU 1.5x faster |
+| NFC normalization | 251 ms | 279 ms | **libutf 1.1x faster** |
+| DUCET collation | 361 ms | 169 ms | ICU 2.1x faster |
 
-When both libraries work in their native encoding, NFC is at parity.
-ICU's collation engine still wins core-to-core thanks to its
-specialized fast-Latin comparison path, but that advantage disappears
-when the caller's data is UTF-8.
+NFC normalization is faster than ICU even core-to-core, thanks to
+incremental normalization that copies clean segments directly and
+only decomposes/recomposes dirty segments.
+
+ICU's collation engine wins core-to-core thanks to its specialized
+fast-Latin comparison path.  With UTF-8 input, the gap narrows to
+1.2x because ICU pays for UTF-8 → UTF-16 conversion.
 
 ## Size
 
 | | Size |
 |---|---|
-| **libutf.a** (stripped) | **670 KB** |
+| **libutf.a** (stripped) | **586 KB** |
 | libicuuc.a + libicui18n.a + libicudata.a | 42,326 KB |
-| **Ratio** | **63x smaller** |
+| **Ratio** | **72x smaller** |
+
+## Correctness
+
+NFC normalization and DUCET collation are verified against ICU 74.2
+as a reference implementation:
+
+- **NFC**: 31 test cases covering precomposed, decomposed, multi-mark
+  reordering, Hangul algorithmic composition, singleton decompositions
+  (OHM SIGN, ANGSTROM SIGN), and mixed-script strings.  All match ICU
+  byte-for-byte.
+
+- **Collation**: 39 test cases covering primary (base character),
+  secondary (accent), and tertiary (case) weight levels, plus
+  case-insensitive comparison and sort key consistency.  Includes
+  canonical equivalence (decomposed and precomposed forms compare
+  equal per UCA), CJK implicit weights, Hangul, and cross-script
+  ordering.  All match ICU.
+
+Tests are in `tests/test_nfc_icu.c` and `tests/test_collate_icu.c`.
+Build with ICU development headers to run them.
 
 ## Design
 
@@ -88,9 +111,10 @@ XYZ D65 → CIELAB) and searches a pre-built Kd-tree that cycles through
 L\*, a\*, b\* axes.  This gives perceptually accurate nearest-color
 results instead of the Euclidean-in-RGB approximation most terminals use.
 
-**No malloc.  No global mutable state.**  All DFA tables are `const`.
-All functions write to caller-provided buffers.  Thread-safe by
-construction.
+**No malloc.**  All DFA tables are `const`.  All functions write to
+caller-provided buffers.  A small ASCII collation-element cache is
+lazily initialized on first use; all other state is immutable.
+Thread-safe by construction.
 
 ## Usage
 
@@ -115,7 +139,7 @@ See `examples/` for complete programs.
 
 ```
 make            # build libutf.a
-make test       # run 347 tests
+make test       # run test suite
 make examples   # build example programs
 make ragel      # regenerate color_ops.c from color_ops.rl (requires Ragel)
 make clean
