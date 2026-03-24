@@ -3,3 +3,7 @@
 *.so
 *.dylib
 tests/test_color_ops
+examples/sort_lines
+examples/nearest_color
+examples/strip_color
+examples/nfc_check

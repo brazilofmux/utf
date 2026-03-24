@@ -55,7 +55,15 @@ test: $(LIB) $(TEST_OBJS)
 	$(CC) $(CFLAGS) -o $(TEST_BIN) $(TEST_OBJS) -L. -lutf -lm
 	./$(TEST_BIN)
 
-clean:
-	rm -f $(LIB_OBJS) $(TEST_OBJS) $(LIB) $(TEST_BIN)
+# Examples
+EXAMPLES = examples/sort_lines examples/nearest_color examples/strip_color examples/nfc_check
 
-.PHONY: all ragel test clean
+examples: $(LIB) $(EXAMPLES)
+
+examples/%: examples/%.c $(LIB)
+	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $< -L. -lutf -lm
+
+clean:
+	rm -f $(LIB_OBJS) $(TEST_OBJS) $(LIB) $(TEST_BIN) $(EXAMPLES)
+
+.PHONY: all ragel test examples clean
