@@ -1,0 +1,10 @@
+*.o
+buildFiles
+classify
+integers
+strings
+pairs
+config.status
+config.log
+Makefile
+autom4te.cache/
