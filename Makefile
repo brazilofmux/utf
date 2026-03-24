@@ -18,6 +18,7 @@ LIB      = libutf.a
 LIB_SRCS = src/color_ops.c \
            src/cie97.c \
            src/console_width.c \
+           src/grapheme.c \
            tables/unicode_tables.c \
            tables/unicode_tables_ext.c \
            tables/charset_tables.c \
