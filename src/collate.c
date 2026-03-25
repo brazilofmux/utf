@@ -317,10 +317,7 @@ static int CollectCEsBounded(const unsigned char *src, size_t nSrc,
 
     *pOverflow = 0;
     while (p < pEnd) {
-        if (nCEs >= maxCEs) {
-            *pOverflow = 1;
-            break;
-        }
+        if (nCEs >= maxCEs) { *pOverflow = 1; break; }
 
         /* ASCII fast path: single table lookup, no DFA. */
         if (*p < 0x80) {
@@ -362,16 +359,19 @@ static int CollectCEsBounded(const unsigned char *src, size_t nSrc,
             }
         }
 
-        {
-            int nAdded = ExtractCEs(&p, pEnd, ces + nCEs, maxCEs - nCEs);
-            nCEs += nAdded;
-            if (p < pEnd && nAdded == maxCEs - (nCEs - nAdded)) {
-                const unsigned char *probe = p;
-                uint32_t tmp[MAX_CHAR_CES];
-                if (probe < pEnd && ExtractCEs(&probe, pEnd, tmp, MAX_CHAR_CES) > 0)
-                    *pOverflow = 1;
+        if (maxCEs - nCEs < MAX_CHAR_CES) {
+            const unsigned char *probe = p;
+            uint32_t tmp[MAX_CHAR_CES];
+            int nProbe = ExtractCEs(&probe, pEnd, tmp, MAX_CHAR_CES);
+            if (nCEs + nProbe > maxCEs) {
+                *pOverflow = 1;
+                break;
             }
-            if (*pOverflow) break;
+            memcpy(ces + nCEs, tmp, (size_t)nProbe * sizeof(tmp[0]));
+            nCEs += nProbe;
+            p = probe;
+        } else {
+            nCEs += ExtractCEs(&p, pEnd, ces + nCEs, maxCEs - nCEs);
         }
     }
     return nCEs;
@@ -438,27 +438,76 @@ static int CompareLevel(const unsigned char *a, size_t nA,
     }
 }
 
-static int CompareLevelBuffered(const uint32_t *cesA, int nCEsA,
-                                const uint32_t *cesB, int nCEsB,
-                                int level)
+static int ComparePrimaryBuffered(const uint32_t *cesA, int nCEsA,
+                                  const uint32_t *cesB, int nCEsB)
 {
     int iA = 0, iB = 0;
 
     for (;;) {
-        while (iA < nCEsA && 0 == CEWeightForLevel(cesA[iA], level)) iA++;
-        while (iB < nCEsB && 0 == CEWeightForLevel(cesB[iB], level)) iB++;
+        while (iA < nCEsA && 0 == CE_PRIMARY(cesA[iA])) iA++;
+        while (iB < nCEsB && 0 == CE_PRIMARY(cesB[iB])) iB++;
         if (iA >= nCEsA || iB >= nCEsB) break;
 
-        unsigned int wA = CEWeightForLevel(cesA[iA], level);
-        unsigned int wB = CEWeightForLevel(cesB[iB], level);
+        unsigned int wA = CE_PRIMARY(cesA[iA]);
+        unsigned int wB = CE_PRIMARY(cesB[iB]);
         if (wA < wB) return -1;
         if (wA > wB) return 1;
         iA++;
         iB++;
     }
 
-    while (iA < nCEsA && 0 == CEWeightForLevel(cesA[iA], level)) iA++;
-    while (iB < nCEsB && 0 == CEWeightForLevel(cesB[iB], level)) iB++;
+    while (iA < nCEsA && 0 == CE_PRIMARY(cesA[iA])) iA++;
+    while (iB < nCEsB && 0 == CE_PRIMARY(cesB[iB])) iB++;
+    if (iA < nCEsA) return 1;
+    if (iB < nCEsB) return -1;
+    return 0;
+}
+
+static int CompareSecondaryBuffered(const uint32_t *cesA, int nCEsA,
+                                    const uint32_t *cesB, int nCEsB)
+{
+    int iA = 0, iB = 0;
+
+    for (;;) {
+        while (iA < nCEsA && 0 == CE_SECONDARY(cesA[iA])) iA++;
+        while (iB < nCEsB && 0 == CE_SECONDARY(cesB[iB])) iB++;
+        if (iA >= nCEsA || iB >= nCEsB) break;
+
+        unsigned int wA = CE_SECONDARY(cesA[iA]);
+        unsigned int wB = CE_SECONDARY(cesB[iB]);
+        if (wA < wB) return -1;
+        if (wA > wB) return 1;
+        iA++;
+        iB++;
+    }
+
+    while (iA < nCEsA && 0 == CE_SECONDARY(cesA[iA])) iA++;
+    while (iB < nCEsB && 0 == CE_SECONDARY(cesB[iB])) iB++;
+    if (iA < nCEsA) return 1;
+    if (iB < nCEsB) return -1;
+    return 0;
+}
+
+static int CompareTertiaryBuffered(const uint32_t *cesA, int nCEsA,
+                                   const uint32_t *cesB, int nCEsB)
+{
+    int iA = 0, iB = 0;
+
+    for (;;) {
+        while (iA < nCEsA && 0 == CE_TERTIARY(cesA[iA])) iA++;
+        while (iB < nCEsB && 0 == CE_TERTIARY(cesB[iB])) iB++;
+        if (iA >= nCEsA || iB >= nCEsB) break;
+
+        unsigned int wA = CE_TERTIARY(cesA[iA]);
+        unsigned int wB = CE_TERTIARY(cesB[iB]);
+        if (wA < wB) return -1;
+        if (wA > wB) return 1;
+        iA++;
+        iB++;
+    }
+
+    while (iA < nCEsA && 0 == CE_TERTIARY(cesA[iA])) iA++;
+    while (iB < nCEsB && 0 == CE_TERTIARY(cesB[iB])) iB++;
     if (iA < nCEsA) return 1;
     if (iB < nCEsB) return -1;
     return 0;
@@ -625,6 +674,9 @@ static int FastLatinCmp(const unsigned char *a, size_t nA,
 int utf_collate_cmp(const unsigned char *a, size_t nA,
                     const unsigned char *b, size_t nB)
 {
+    if (nA == nB && (a == b || 0 == memcmp(a, b, nA)))
+        return 0;
+
     /* Fast path: Latin-only strings compared inline. */
     int fastResult;
     if (FastLatinCmp(a, nA, b, nB, &fastResult))
@@ -637,11 +689,11 @@ int utf_collate_cmp(const unsigned char *a, size_t nA,
         int nCEsB = CollectCEsBounded(b, nB, cesB, MAX_CMP_CES, &overflowB);
 
         if (!overflowA && !overflowB) {
-            int cmp = CompareLevelBuffered(cesA, nCEsA, cesB, nCEsB, 1);
+            int cmp = ComparePrimaryBuffered(cesA, nCEsA, cesB, nCEsB);
             if (0 != cmp) return cmp;
-            cmp = CompareLevelBuffered(cesA, nCEsA, cesB, nCEsB, 2);
+            cmp = CompareSecondaryBuffered(cesA, nCEsA, cesB, nCEsB);
             if (0 != cmp) return cmp;
-            cmp = CompareLevelBuffered(cesA, nCEsA, cesB, nCEsB, 3);
+            cmp = CompareTertiaryBuffered(cesA, nCEsA, cesB, nCEsB);
             if (0 != cmp) return cmp;
             return CompareNFCTiebreak(a, nA, b, nB);
         }
@@ -669,6 +721,9 @@ int utf_collate_cmp(const unsigned char *a, size_t nA,
 int utf_collate_cmp_ci(const unsigned char *a, size_t nA,
                        const unsigned char *b, size_t nB)
 {
+    if (nA == nB && (a == b || 0 == memcmp(a, b, nA)))
+        return 0;
+
     {
         uint32_t cesA[MAX_CMP_CES], cesB[MAX_CMP_CES];
         int overflowA, overflowB;
@@ -676,9 +731,9 @@ int utf_collate_cmp_ci(const unsigned char *a, size_t nA,
         int nCEsB = CollectCEsBounded(b, nB, cesB, MAX_CMP_CES, &overflowB);
 
         if (!overflowA && !overflowB) {
-            int cmp = CompareLevelBuffered(cesA, nCEsA, cesB, nCEsB, 1);
+            int cmp = ComparePrimaryBuffered(cesA, nCEsA, cesB, nCEsB);
             if (0 != cmp) return cmp;
-            return CompareLevelBuffered(cesA, nCEsA, cesB, nCEsB, 2);
+            return CompareSecondaryBuffered(cesA, nCEsA, cesB, nCEsB);
         }
     }
 
