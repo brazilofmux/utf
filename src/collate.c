@@ -726,6 +726,25 @@ static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
     return 1;
 }
 
+static int FastASCIISortKeyCI(const unsigned char *src, size_t nSrc,
+                              unsigned char *key, size_t nKeyMax,
+                              size_t *pPos)
+{
+    EnsureLatinCache();
+
+    for (size_t i = 0; i < nSrc; i++) {
+        if (src[i] >= 0x80 || 0 == s_latin_ce[src[i]])
+            return 0;
+    }
+
+    for (size_t i = 0; i < nSrc; i++)
+        AppendBE16(key, nKeyMax, pPos, CE_PRIMARY(s_latin_ce[src[i]]));
+    AppendBE16(key, nKeyMax, pPos, 0);
+    for (size_t i = 0; i < nSrc; i++)
+        AppendBE16(key, nKeyMax, pPos, CE_SECONDARY(s_latin_ce[src[i]]));
+    return 1;
+}
+
 /* --- Public API --- */
 
 int utf_collate_cmp(const unsigned char *a, size_t nA,
@@ -843,6 +862,10 @@ size_t utf_collate_sortkey_ci(const unsigned char *src, size_t nSrc,
                               unsigned char *key, size_t nKeyMax)
 {
     size_t pos = 0;
+
+    if (FastASCIISortKeyCI(src, nSrc, key, nKeyMax, &pos))
+        return (pos < nKeyMax) ? pos : nKeyMax;
+
     uint32_t ces[MAX_SORTKEY_CES];
     int overflow;
     int nCEs = CollectCEsBounded(src, nSrc, ces, MAX_SORTKEY_CES, &overflow);
