@@ -57,13 +57,19 @@ test: $(LIB) $(TEST_OBJS)
 
 # Examples
 EXAMPLES = examples/sort_lines examples/nearest_color examples/strip_color examples/nfc_check
+BENCHES  = bench/bench_collate_libutf
 
 examples: $(LIB) $(EXAMPLES)
+
+bench: $(LIB) $(BENCHES)
 
 examples/%: examples/%.c $(LIB)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $< -L. -lutf -lm
 
-clean:
-	rm -f $(LIB_OBJS) $(TEST_OBJS) $(LIB) $(TEST_BIN) $(EXAMPLES)
+bench/bench_collate_libutf: bench/bench_collate_libutf.c $(LIB)
+	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $< -L. -lutf -lm
 
-.PHONY: all ragel test examples clean
+clean:
+	rm -f $(LIB_OBJS) $(TEST_OBJS) $(LIB) $(TEST_BIN) $(EXAMPLES) $(BENCHES)
+
+.PHONY: all ragel test examples bench clean

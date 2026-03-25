@@ -10,6 +10,7 @@
 #include "utf/collate.h"
 #include "utf/nfc.h"
 #include "utf/utf_tables.h"
+#include <stdatomic.h>
 #include <string.h>
 #include <stdint.h>
 
@@ -275,7 +276,7 @@ static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
  */
 #define LATIN_CE_LIMIT 0x180
 static uint32_t s_latin_ce[LATIN_CE_LIMIT];
-static int      s_latin_ce_init;
+static atomic_int s_latin_ce_state;
 
 static void InitLatinCache(void)
 {
@@ -301,7 +302,26 @@ static void InitLatinCache(void)
         }
         s_latin_ce[cp] = 0;
     }
-    s_latin_ce_init = 1;
+}
+
+static void EnsureLatinCache(void)
+{
+    int state = atomic_load_explicit(&s_latin_ce_state, memory_order_acquire);
+    if (2 == state) return;
+
+    int expected = 0;
+    if (atomic_compare_exchange_strong_explicit(
+            &s_latin_ce_state, &expected, 1,
+            memory_order_acq_rel, memory_order_acquire)) {
+        InitLatinCache();
+        atomic_store_explicit(&s_latin_ce_state, 2, memory_order_release);
+        return;
+    }
+
+    while (1 != 0) {
+        state = atomic_load_explicit(&s_latin_ce_state, memory_order_acquire);
+        if (2 == state) return;
+    }
 }
 
 /* --- CE collection (bounded fast path) --- */
@@ -309,7 +329,7 @@ static void InitLatinCache(void)
 static int CollectCEsBounded(const unsigned char *src, size_t nSrc,
                              uint32_t *ces, int maxCEs, int *pOverflow)
 {
-    if (!s_latin_ce_init) InitLatinCache();
+    EnsureLatinCache();
 
     const unsigned char *p = src;
     const unsigned char *pEnd = src + nSrc;
@@ -625,7 +645,7 @@ static int FastLatinCmp(const unsigned char *a, size_t nA,
                         const unsigned char *b, size_t nB,
                         int *pResult)
 {
-    if (!s_latin_ce_init) InitLatinCache();
+    EnsureLatinCache();
 
     const unsigned char *pa = a, *paEnd = a + nA;
     const unsigned char *pb = b, *pbEnd = b + nB;
@@ -666,6 +686,43 @@ static int FastLatinCmp(const unsigned char *a, size_t nA,
     if (0 != tertDiff) { *pResult = tertDiff; return 1; }
 
     *pResult = 0;
+    return 1;
+}
+
+static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
+                            unsigned char *key, size_t nKeyMax,
+                            size_t *pPos, int bCaseSensitive)
+{
+    EnsureLatinCache();
+
+    const unsigned char *p = src;
+    const unsigned char *pEnd = src + nSrc;
+
+    while (p < pEnd) {
+        uint32_t ce = NextLatinCE(&p, pEnd);
+        if (0 == ce) return 0;
+        AppendBE16(key, nKeyMax, pPos, CE_PRIMARY(ce));
+    }
+    AppendBE16(key, nKeyMax, pPos, 0);
+
+    p = src;
+    while (p < pEnd) {
+        uint32_t ce = NextLatinCE(&p, pEnd);
+        AppendBE16(key, nKeyMax, pPos, CE_SECONDARY(ce));
+    }
+
+    if (bCaseSensitive) {
+        AppendBE16(key, nKeyMax, pPos, 0);
+        p = src;
+        while (p < pEnd) {
+            uint32_t ce = NextLatinCE(&p, pEnd);
+            AppendByte(key, nKeyMax, pPos, (unsigned char)CE_TERTIARY(ce));
+        }
+        AppendByte(key, nKeyMax, pPos, 0);
+        for (size_t i = 0; i < nSrc; i++)
+            AppendByte(key, nKeyMax, pPos, src[i]);
+    }
+
     return 1;
 }
 
@@ -745,8 +802,12 @@ int utf_collate_cmp_ci(const unsigned char *a, size_t nA,
 size_t utf_collate_sortkey(const unsigned char *src, size_t nSrc,
                            unsigned char *key, size_t nKeyMax)
 {
-    uint32_t ces[MAX_SORTKEY_CES];
     size_t pos = 0;
+
+    if (FastLatinSortKey(src, nSrc, key, nKeyMax, &pos, 1))
+        return (pos < nKeyMax) ? pos : nKeyMax;
+
+    uint32_t ces[MAX_SORTKEY_CES];
     int overflow;
     int nCEs = CollectCEsBounded(src, nSrc, ces, MAX_SORTKEY_CES, &overflow);
 
@@ -781,8 +842,8 @@ size_t utf_collate_sortkey(const unsigned char *src, size_t nSrc,
 size_t utf_collate_sortkey_ci(const unsigned char *src, size_t nSrc,
                               unsigned char *key, size_t nKeyMax)
 {
-    uint32_t ces[MAX_SORTKEY_CES];
     size_t pos = 0;
+    uint32_t ces[MAX_SORTKEY_CES];
     int overflow;
     int nCEs = CollectCEsBounded(src, nSrc, ces, MAX_SORTKEY_CES, &overflow);
 

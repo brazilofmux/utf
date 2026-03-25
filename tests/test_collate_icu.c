@@ -133,6 +133,28 @@ static void test_sortkey_matches_cmp(const char *label,
     }
 }
 
+static void test_sortkey_ci_matches_cmp_ci(const char *label,
+                                           const unsigned char *a, size_t nA,
+                                           const unsigned char *b, size_t nB)
+{
+    unsigned char ka[16384], kb[16384];
+    size_t kla = utf_collate_sortkey_ci(a, nA, ka, sizeof(ka));
+    size_t klb = utf_collate_sortkey_ci(b, nB, kb, sizeof(kb));
+    int key_cmp = memcmp(ka, kb, (kla < klb) ? kla : klb);
+    if (0 == key_cmp) key_cmp = (kla > klb) - (kla < klb);
+    int key_sign = sign(key_cmp);
+
+    int cmp_sign = sign(utf_collate_cmp_ci(a, nA, b, nB));
+
+    if (key_sign != cmp_sign) {
+        printf("  FAIL sortkey_ci %s: cmp=%d sortkey=%d\n",
+               label, cmp_sign, key_sign);
+        g_fail++;
+    } else {
+        g_pass++;
+    }
+}
+
 static void test_ci_bytes(const char *label,
                           const unsigned char *a, size_t nA,
                           const unsigned char *b, size_t nB,
@@ -227,6 +249,12 @@ int main(void)
     test_ci("ci_diff_case", "Hello", "hello", 0);
     test_ci("ci_diff_char", "a", "b", -1);
     test_ci("ci_accent", "cafe", "caf\xc3\xa9", -1);
+    test_sortkey_ci_matches_cmp_ci("skci_case_fold",
+                                   (const unsigned char *)"Hello", 5,
+                                   (const unsigned char *)"hello", 5);
+    test_sortkey_ci_matches_cmp_ci("skci_accent",
+                                   (const unsigned char *)"cafe", 4,
+                                   (const unsigned char *)"caf\xc3\xa9", 5);
 
     printf("\n[sortkey consistency]\n");
 
@@ -262,6 +290,8 @@ int main(void)
                       longa, 5001, longb, 5001, -1);
         test_sortkey_matches_cmp("sk_long_tail_primary",
                                  longa, 5001, longb, 5001);
+        test_sortkey_ci_matches_cmp_ci("skci_long_tail_primary",
+                                       longa, 5001, longb, 5001);
     }
 
     {
