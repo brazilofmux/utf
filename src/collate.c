@@ -652,6 +652,12 @@ static int FastLatinCmp(const unsigned char *a, size_t nA,
     int secDiff = 0, tertDiff = 0;
 
     while (pa < paEnd && pb < pbEnd) {
+        while (pa < paEnd && pb < pbEnd && *pa < 0x80 && *pa == *pb) {
+            pa++;
+            pb++;
+        }
+        if (pa >= paEnd || pb >= pbEnd) break;
+
         uint32_t ceA = NextLatinCE(&pa, paEnd);
         if (0 == ceA) return 0;
         uint32_t ceB = NextLatinCE(&pb, pbEnd);
