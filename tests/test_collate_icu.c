@@ -43,6 +43,31 @@ static void test_cmp(const char *label,
     }
 }
 
+static void test_cmp_bytes(const char *label,
+                           const unsigned char *a, size_t nA,
+                           const unsigned char *b, size_t nB,
+                           UCollator *coll)
+{
+    int lr = utf_collate_cmp(a, nA, b, nB);
+    UErrorCode err = U_ZERO_ERROR;
+    UChar ua[8192], ub[8192];
+    int32_t ual, ubl;
+    u_strFromUTF8(ua, 8192, &ual, (const char *)a, (int32_t)nA, &err);
+    u_strFromUTF8(ub, 8192, &ubl, (const char *)b, (int32_t)nB, &err);
+    UCollationResult ir = ucol_strcoll(coll, ua, ual, ub, ubl);
+
+    int ls = sign(lr);
+    int is = (ir == UCOL_LESS) ? -1 : (ir == UCOL_GREATER) ? 1 : 0;
+
+    if (ls != is) {
+        printf("  FAIL %s: libutf=%d ICU=%d\n",
+               label, ls, is);
+        g_fail++;
+    } else {
+        g_pass++;
+    }
+}
+
 static void test_ci(const char *label,
                     const char *a, const char *b,
                     int expected_sign)
@@ -63,6 +88,7 @@ static void test_sortkey_order(const char *label,
                                const char *a, const char *b,
                                UCollator *coll)
 {
+    (void)coll;
     unsigned char ka[1024], kb[1024];
     size_t kla = utf_collate_sortkey((const unsigned char *)a, strlen(a),
                                       ka, sizeof(ka));
@@ -79,6 +105,44 @@ static void test_sortkey_order(const char *label,
     if (key_sign != cmp_sign) {
         printf("  FAIL sortkey %s: cmp=%d sortkey=%d\n",
                label, cmp_sign, key_sign);
+        g_fail++;
+    } else {
+        g_pass++;
+    }
+}
+
+static void test_sortkey_matches_cmp(const char *label,
+                                     const unsigned char *a, size_t nA,
+                                     const unsigned char *b, size_t nB)
+{
+    unsigned char ka[16384], kb[16384];
+    size_t kla = utf_collate_sortkey(a, nA, ka, sizeof(ka));
+    size_t klb = utf_collate_sortkey(b, nB, kb, sizeof(kb));
+    int key_cmp = memcmp(ka, kb, (kla < klb) ? kla : klb);
+    if (0 == key_cmp) key_cmp = (kla > klb) - (kla < klb);
+    int key_sign = sign(key_cmp);
+
+    int cmp_sign = sign(utf_collate_cmp(a, nA, b, nB));
+
+    if (key_sign != cmp_sign) {
+        printf("  FAIL sortkey_match %s: cmp=%d sortkey=%d\n",
+               label, cmp_sign, key_sign);
+        g_fail++;
+    } else {
+        g_pass++;
+    }
+}
+
+static void test_ci_bytes(const char *label,
+                          const unsigned char *a, size_t nA,
+                          const unsigned char *b, size_t nB,
+                          int expected_sign)
+{
+    int lr = utf_collate_cmp_ci(a, nA, b, nB);
+    int ls = sign(lr);
+    if (ls != expected_sign) {
+        printf("  FAIL ci %s: got=%d expected=%d\n",
+               label, ls, expected_sign);
         g_fail++;
     } else {
         g_pass++;
@@ -174,6 +238,44 @@ int main(void)
     test_sortkey_order("sk_hangul",
                        "\xed\x95\x9c\xea\xb5\xad",
                        "\xec\xa4\x91\xea\xb5\xad", coll);
+
+    /* --- Regression: tiebreaker and long-input handling --- */
+    {
+        const unsigned char plain_a[] = "a";
+        const unsigned char cgj_a[] = "a\xCD\x8F";
+        test_sortkey_matches_cmp("sk_tiebreaker_cgj",
+                                 plain_a, strlen((const char *)plain_a),
+                                 cgj_a, strlen((const char *)cgj_a));
+    }
+
+    {
+        unsigned char longa[5002], longb[5002];
+        memset(longa, 'a', 5000);
+        memset(longb, 'a', 5000);
+        longa[5000] = 'e';
+        longa[5001] = '\0';
+        longb[5000] = 'f';
+        longb[5001] = '\0';
+        test_cmp("long_tail_primary",
+                 (const char *)longa, (const char *)longb, coll);
+        test_ci_bytes("long_tail_primary_ci",
+                      longa, 5001, longb, 5001, -1);
+        test_sortkey_matches_cmp("sk_long_tail_primary",
+                                 longa, 5001, longb, 5001);
+    }
+
+    {
+        unsigned char longa[259], longb[258];
+        memset(longa, 'a', 256);
+        memset(longb, 'a', 256);
+        longa[256] = 0xC3;
+        longa[257] = 0xA9;
+        longa[258] = '\0';
+        longb[256] = 'f';
+        longb[257] = '\0';
+        test_cmp_bytes("long_tail_nonlatin_primary",
+                       longa, 258, longb, 257, coll);
+    }
 
     ucol_close(coll);
     printf("\n%d passed, %d failed\n", g_pass, g_fail);

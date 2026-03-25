@@ -26,12 +26,11 @@
 #define CE_SECONDARY(w) (((w) >> 5) & 0x07FF)
 #define CE_TERTIARY(w)  ((w) & 0x1F)
 
-/* CE buffer size for comparison.  256 CEs supports strings up to ~200
- * characters, which covers the vast majority of real-world comparisons.
- * Sort key generation uses a larger buffer (MAX_SORTKEY_CES).
+/* Per-code-point CE scratch space.
+ * DUCET mappings are short; comparison and sortkey generation stream the
+ * input and only need to hold the current character's CE sequence.
  */
-#define MAX_CMP_CES 256
-#define MAX_SORTKEY_CES 4096
+#define MAX_CHAR_CES 64
 
 /* --- UTF-8 helpers --- */
 
@@ -303,62 +302,141 @@ static void InitLatinCache(void)
     s_latin_ce_init = 1;
 }
 
-/* --- CE collection (full string) --- */
+typedef struct {
+    const unsigned char *p;
+    const unsigned char *pEnd;
+    uint32_t ces[MAX_CHAR_CES];
+    int iCE;
+    int nCEs;
+} CEIterator;
 
-static int CollectCEs(const unsigned char *src, size_t nSrc,
-                      uint32_t *ces, int maxCEs)
+static void CEIteratorInit(CEIterator *it, const unsigned char *src, size_t nSrc)
 {
-    if (!s_latin_ce_init) InitLatinCache();
+    it->p = src;
+    it->pEnd = src + nSrc;
+    it->iCE = 0;
+    it->nCEs = 0;
+}
 
-    const unsigned char *p = src;
-    const unsigned char *pEnd = src + nSrc;
-    int nCEs = 0;
+static unsigned int CEWeightForLevel(uint32_t ce, int level)
+{
+    if (1 == level) return CE_PRIMARY(ce);
+    if (2 == level) return CE_SECONDARY(ce);
+    return CE_TERTIARY(ce);
+}
 
-    while (p < pEnd && nCEs < maxCEs) {
-        /* ASCII fast path: single table lookup, no DFA. */
-        if (*p < 0x80) {
-            uint32_t ce = s_latin_ce[*p];
-            if (0 != ce) {
-                ces[nCEs++] = ce;
-                p++;
-                continue;
-            }
-            /* Rare: ASCII with 0 or multiple CEs — fall through. */
-        }
-        /* Latin 2-byte fast path: U+0080..U+017F (lead bytes 0xC2..0xC5).
-         * Direct decode + table lookup — no DFA, no contraction check.
-         */
-        else if ((unsigned)(*p - 0xC2) <= (0xC5 - 0xC2)
-                 && p + 1 < pEnd && (p[1] & 0xC0) == 0x80) {
-            uint32_t cp = (uint32_t)((*p & 0x1F) << 6) | (p[1] & 0x3F);
-            uint32_t ce = s_latin_ce[cp];
-            if (0 != ce) {
-                ces[nCEs++] = ce;
-                p += 2;
-                continue;
+static int CEIteratorNextWeight(CEIterator *it, int level, unsigned int *pWeight)
+{
+    for (;;) {
+        while (it->iCE < it->nCEs) {
+            unsigned int weight = CEWeightForLevel(it->ces[it->iCE++], level);
+            if (0 != weight) {
+                *pWeight = weight;
+                return 1;
             }
         }
-        /* CJK Unified Ideographs fast path: U+4E00..U+9FFF (lead 0xE4..0xE9).
-         * These always use implicit weights — skip the DFA entirely.
-         */
-        else if (*p >= 0xE4 && *p <= 0xE9
-                 && p + 2 < pEnd
-                 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) {
-            uint32_t cp = ((uint32_t)(*p & 0x0F) << 12)
-                        | ((uint32_t)(p[1] & 0x3F) << 6)
-                        | (uint32_t)(p[2] & 0x3F);
-            if (cp >= 0x4E00 && cp <= 0x9FFF && nCEs + 1 < maxCEs) {
-                unsigned short aaaa = 0xFB40 + (unsigned short)(cp >> 15);
-                unsigned short bbbb = (unsigned short)((cp & 0x7FFF) | 0x8000);
-                ces[nCEs++] = ((uint32_t)aaaa << 16) | ((uint32_t)0x0020 << 5) | 0x0002;
-                ces[nCEs++] = (uint32_t)bbbb << 16;
-                p += 3;
-                continue;
-            }
-        }
-        nCEs += ExtractCEs(&p, pEnd, ces + nCEs, maxCEs - nCEs);
+        if (it->p >= it->pEnd) return 0;
+        it->nCEs = ExtractCEs(&it->p, it->pEnd, it->ces, MAX_CHAR_CES);
+        it->iCE = 0;
     }
-    return nCEs;
+}
+
+static int CompareLevel(const unsigned char *a, size_t nA,
+                        const unsigned char *b, size_t nB,
+                        int level)
+{
+    CEIterator itA, itB;
+    CEIteratorInit(&itA, a, nA);
+    CEIteratorInit(&itB, b, nB);
+
+    for (;;) {
+        unsigned int wA, wB;
+        int hasA = CEIteratorNextWeight(&itA, level, &wA);
+        int hasB = CEIteratorNextWeight(&itB, level, &wB);
+        if (!hasA || !hasB) {
+            if (hasA) return 1;
+            if (hasB) return -1;
+            return 0;
+        }
+        if (wA < wB) return -1;
+        if (wA > wB) return 1;
+    }
+}
+
+static size_t GetNFCBytes(const unsigned char *src, size_t nSrc,
+                          unsigned char *buf, size_t nBuf,
+                          const unsigned char **ppOut)
+{
+    if (utf_nfc_is_nfc(src, nSrc)) {
+        *ppOut = src;
+        return nSrc;
+    }
+    utf_nfc_normalize(src, nSrc, buf, nBuf, &nSrc);
+    *ppOut = buf;
+    return nSrc;
+}
+
+static int CompareNFCTiebreak(const unsigned char *a, size_t nA,
+                              const unsigned char *b, size_t nB)
+{
+    size_t capA = nA ? nA : 1;
+    size_t capB = nB ? nB : 1;
+    unsigned char nfcBufA[capA];
+    unsigned char nfcBufB[capB];
+    const unsigned char *tieA;
+    const unsigned char *tieB;
+    size_t tieNA = GetNFCBytes(a, nA, nfcBufA, capA, &tieA);
+    size_t tieNB = GetNFCBytes(b, nB, nfcBufB, capB, &tieB);
+    size_t nMin = (tieNA < tieNB) ? tieNA : tieNB;
+    int cmp = memcmp(tieA, tieB, nMin);
+    if (0 != cmp) return cmp;
+    if (tieNA < tieNB) return -1;
+    if (tieNA > tieNB) return 1;
+    return 0;
+}
+
+static void AppendBE16(unsigned char *key, size_t nKeyMax, size_t *pPos,
+                       unsigned int value)
+{
+    if (*pPos + 2 <= nKeyMax) {
+        key[*pPos] = (unsigned char)(value >> 8);
+        key[*pPos + 1] = (unsigned char)(value & 0xFF);
+    }
+    *pPos += 2;
+}
+
+static void AppendByte(unsigned char *key, size_t nKeyMax, size_t *pPos,
+                       unsigned char value)
+{
+    if (*pPos < nKeyMax) key[*pPos] = value;
+    (*pPos)++;
+}
+
+static void AppendLevelSortKey(const unsigned char *src, size_t nSrc,
+                               unsigned char *key, size_t nKeyMax,
+                               size_t *pPos, int level)
+{
+    CEIterator it;
+    CEIteratorInit(&it, src, nSrc);
+    for (;;) {
+        unsigned int weight;
+        if (!CEIteratorNextWeight(&it, level, &weight)) break;
+        if (level < 3) AppendBE16(key, nKeyMax, pPos, weight);
+        else AppendByte(key, nKeyMax, pPos, (unsigned char)weight);
+    }
+}
+
+static void AppendNFCTiebreak(const unsigned char *src, size_t nSrc,
+                              unsigned char *key, size_t nKeyMax,
+                              size_t *pPos)
+{
+    size_t cap = nSrc ? nSrc : 1;
+    unsigned char nfcBuf[cap];
+    const unsigned char *norm;
+    size_t nNorm = GetNFCBytes(src, nSrc, nfcBuf, cap, &norm);
+    AppendByte(key, nKeyMax, pPos, 0);
+    for (size_t i = 0; i < nNorm; i++)
+        AppendByte(key, nKeyMax, pPos, norm[i]);
 }
 
 /* --- Latin fast-path comparison --- */
@@ -451,61 +529,12 @@ int utf_collate_cmp(const unsigned char *a, size_t nA,
     if (FastLatinCmp(a, nA, b, nB, &fastResult))
         return fastResult;
 
-    uint32_t cesA[MAX_CMP_CES], cesB[MAX_CMP_CES];
-    int nCEsA = CollectCEs(a, nA, cesA, MAX_CMP_CES);
-    int nCEsB = CollectCEs(b, nB, cesB, MAX_CMP_CES);
-    int iA, iB;
-
-    /* Level 1: primary. */
-    iA = 0; iB = 0;
-    for (;;) {
-        while (iA < nCEsA && 0 == CE_PRIMARY(cesA[iA])) iA++;
-        while (iB < nCEsB && 0 == CE_PRIMARY(cesB[iB])) iB++;
-        if (iA >= nCEsA || iB >= nCEsB) break;
-        unsigned short pA = CE_PRIMARY(cesA[iA]);
-        unsigned short pB = CE_PRIMARY(cesB[iB]);
-        if (pA < pB) return -1;
-        if (pA > pB) return 1;
-        iA++; iB++;
-    }
-    while (iA < nCEsA && 0 == CE_PRIMARY(cesA[iA])) iA++;
-    while (iB < nCEsB && 0 == CE_PRIMARY(cesB[iB])) iB++;
-    if (iA < nCEsA) return 1;
-    if (iB < nCEsB) return -1;
-
-    /* Level 2: secondary. */
-    iA = 0; iB = 0;
-    for (;;) {
-        while (iA < nCEsA && 0 == CE_SECONDARY(cesA[iA])) iA++;
-        while (iB < nCEsB && 0 == CE_SECONDARY(cesB[iB])) iB++;
-        if (iA >= nCEsA || iB >= nCEsB) break;
-        unsigned short sA = CE_SECONDARY(cesA[iA]);
-        unsigned short sB = CE_SECONDARY(cesB[iB]);
-        if (sA < sB) return -1;
-        if (sA > sB) return 1;
-        iA++; iB++;
-    }
-    while (iA < nCEsA && 0 == CE_SECONDARY(cesA[iA])) iA++;
-    while (iB < nCEsB && 0 == CE_SECONDARY(cesB[iB])) iB++;
-    if (iA < nCEsA) return 1;
-    if (iB < nCEsB) return -1;
-
-    /* Level 3: tertiary. */
-    iA = 0; iB = 0;
-    for (;;) {
-        while (iA < nCEsA && 0 == CE_TERTIARY(cesA[iA])) iA++;
-        while (iB < nCEsB && 0 == CE_TERTIARY(cesB[iB])) iB++;
-        if (iA >= nCEsA || iB >= nCEsB) break;
-        unsigned char tA = CE_TERTIARY(cesA[iA]);
-        unsigned char tB = CE_TERTIARY(cesB[iB]);
-        if (tA < tB) return -1;
-        if (tA > tB) return 1;
-        iA++; iB++;
-    }
-    while (iA < nCEsA && 0 == CE_TERTIARY(cesA[iA])) iA++;
-    while (iB < nCEsB && 0 == CE_TERTIARY(cesB[iB])) iB++;
-    if (iA < nCEsA) return 1;
-    if (iB < nCEsB) return -1;
+    int cmp = CompareLevel(a, nA, b, nB, 1);
+    if (0 != cmp) return cmp;
+    cmp = CompareLevel(a, nA, b, nB, 2);
+    if (0 != cmp) return cmp;
+    cmp = CompareLevel(a, nA, b, nB, 3);
+    if (0 != cmp) return cmp;
 
     /* Tiebreaker: binary comparison of NFC-normalized forms.
      * UCA requires canonical equivalents to compare equal.  Levels 1-3
@@ -516,131 +545,38 @@ int utf_collate_cmp(const unsigned char *a, size_t nA,
      * We defer normalization to this point because most comparisons
      * resolve at levels 1-3 and never reach the tiebreaker.
      */
-    unsigned char nfcBufA[UTF_BUFSIZE], nfcBufB[UTF_BUFSIZE];
-    const unsigned char *tieA = a;
-    const unsigned char *tieB = b;
-    size_t tieNA = nA, tieNB = nB;
-
-    if (!utf_nfc_is_nfc(a, nA)) {
-        utf_nfc_normalize(a, nA, nfcBufA, sizeof(nfcBufA), &tieNA);
-        tieA = nfcBufA;
-    }
-    if (!utf_nfc_is_nfc(b, nB)) {
-        utf_nfc_normalize(b, nB, nfcBufB, sizeof(nfcBufB), &tieNB);
-        tieB = nfcBufB;
-    }
-
-    size_t nMin = (tieNA < tieNB) ? tieNA : tieNB;
-    int cmp = memcmp(tieA, tieB, nMin);
-    if (0 != cmp) return cmp;
-    if (tieNA < tieNB) return -1;
-    if (tieNA > tieNB) return 1;
-    return 0;
+    return CompareNFCTiebreak(a, nA, b, nB);
 }
 
 int utf_collate_cmp_ci(const unsigned char *a, size_t nA,
                        const unsigned char *b, size_t nB)
 {
-    uint32_t cesA[MAX_CMP_CES], cesB[MAX_CMP_CES];
-    int nCEsA = CollectCEs(a, nA, cesA, MAX_CMP_CES);
-    int nCEsB = CollectCEs(b, nB, cesB, MAX_CMP_CES);
-    int iA, iB;
-
-    /* Level 1: primary. */
-    iA = 0; iB = 0;
-    for (;;) {
-        while (iA < nCEsA && 0 == CE_PRIMARY(cesA[iA])) iA++;
-        while (iB < nCEsB && 0 == CE_PRIMARY(cesB[iB])) iB++;
-        if (iA >= nCEsA || iB >= nCEsB) break;
-        unsigned short pA = CE_PRIMARY(cesA[iA]);
-        unsigned short pB = CE_PRIMARY(cesB[iB]);
-        if (pA < pB) return -1;
-        if (pA > pB) return 1;
-        iA++; iB++;
-    }
-    while (iA < nCEsA && 0 == CE_PRIMARY(cesA[iA])) iA++;
-    while (iB < nCEsB && 0 == CE_PRIMARY(cesB[iB])) iB++;
-    if (iA < nCEsA) return 1;
-    if (iB < nCEsB) return -1;
-
-    /* Level 2: secondary. */
-    iA = 0; iB = 0;
-    for (;;) {
-        while (iA < nCEsA && 0 == CE_SECONDARY(cesA[iA])) iA++;
-        while (iB < nCEsB && 0 == CE_SECONDARY(cesB[iB])) iB++;
-        if (iA >= nCEsA || iB >= nCEsB) break;
-        unsigned short sA = CE_SECONDARY(cesA[iA]);
-        unsigned short sB = CE_SECONDARY(cesB[iB]);
-        if (sA < sB) return -1;
-        if (sA > sB) return 1;
-        iA++; iB++;
-    }
-    while (iA < nCEsA && 0 == CE_SECONDARY(cesA[iA])) iA++;
-    while (iB < nCEsB && 0 == CE_SECONDARY(cesB[iB])) iB++;
-    if (iA < nCEsA) return 1;
-    if (iB < nCEsB) return -1;
-
-    return 0;
+    int cmp = CompareLevel(a, nA, b, nB, 1);
+    if (0 != cmp) return cmp;
+    return CompareLevel(a, nA, b, nB, 2);
 }
 
 size_t utf_collate_sortkey(const unsigned char *src, size_t nSrc,
                            unsigned char *key, size_t nKeyMax)
 {
-    uint32_t ces[MAX_SORTKEY_CES];
-    int nCEs = CollectCEs(src, nSrc, ces, MAX_SORTKEY_CES);
     size_t pos = 0;
 
-    /* Level 1: primary (16-bit big-endian). */
-    for (int i = 0; i < nCEs; i++) {
-        unsigned short p = CE_PRIMARY(ces[i]);
-        if (0 != p && pos + 2 <= nKeyMax) {
-            key[pos++] = (unsigned char)(p >> 8);
-            key[pos++] = (unsigned char)(p & 0xFF);
-        }
-    }
-    if (pos + 2 <= nKeyMax) { key[pos++] = 0; key[pos++] = 0; }
-
-    /* Level 2: secondary (16-bit big-endian). */
-    for (int i = 0; i < nCEs; i++) {
-        unsigned short s = CE_SECONDARY(ces[i]);
-        if (0 != s && pos + 2 <= nKeyMax) {
-            key[pos++] = (unsigned char)(s >> 8);
-            key[pos++] = (unsigned char)(s & 0xFF);
-        }
-    }
-    if (pos + 2 <= nKeyMax) { key[pos++] = 0; key[pos++] = 0; }
-
-    /* Level 3: tertiary (8-bit). */
-    for (int i = 0; i < nCEs; i++) {
-        unsigned char t = CE_TERTIARY(ces[i]);
-        if (0 != t && pos + 1 <= nKeyMax)
-            key[pos++] = t;
-    }
-    return pos;
+    AppendLevelSortKey(src, nSrc, key, nKeyMax, &pos, 1);
+    AppendBE16(key, nKeyMax, &pos, 0);
+    AppendLevelSortKey(src, nSrc, key, nKeyMax, &pos, 2);
+    AppendBE16(key, nKeyMax, &pos, 0);
+    AppendLevelSortKey(src, nSrc, key, nKeyMax, &pos, 3);
+    AppendNFCTiebreak(src, nSrc, key, nKeyMax, &pos);
+    return (pos < nKeyMax) ? pos : nKeyMax;
 }
 
 size_t utf_collate_sortkey_ci(const unsigned char *src, size_t nSrc,
                               unsigned char *key, size_t nKeyMax)
 {
-    uint32_t ces[MAX_SORTKEY_CES];
-    int nCEs = CollectCEs(src, nSrc, ces, MAX_SORTKEY_CES);
     size_t pos = 0;
 
-    for (int i = 0; i < nCEs; i++) {
-        unsigned short p = CE_PRIMARY(ces[i]);
-        if (0 != p && pos + 2 <= nKeyMax) {
-            key[pos++] = (unsigned char)(p >> 8);
-            key[pos++] = (unsigned char)(p & 0xFF);
-        }
-    }
-    if (pos + 2 <= nKeyMax) { key[pos++] = 0; key[pos++] = 0; }
-
-    for (int i = 0; i < nCEs; i++) {
-        unsigned short s = CE_SECONDARY(ces[i]);
-        if (0 != s && pos + 2 <= nKeyMax) {
-            key[pos++] = (unsigned char)(s >> 8);
-            key[pos++] = (unsigned char)(s & 0xFF);
-        }
-    }
-    return pos;
+    AppendLevelSortKey(src, nSrc, key, nKeyMax, &pos, 1);
+    AppendBE16(key, nKeyMax, &pos, 0);
+    AppendLevelSortKey(src, nSrc, key, nKeyMax, &pos, 2);
+    return (pos < nKeyMax) ? pos : nKeyMax;
 }
