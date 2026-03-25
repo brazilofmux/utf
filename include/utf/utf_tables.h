@@ -99,19 +99,15 @@ extern UTF_API const unsigned char  cl_extpict_sbt[510];
 
 /* ---- NFC normalization DFAs ---- */
 
-/* tr_ccc: Canonical Combining Class */
-#define TR_CCC_START_STATE (0)
-#define TR_CCC_ACCEPTING_STATES_START (132)
-extern UTF_API const unsigned char  tr_ccc_itt[256];
-extern UTF_API const unsigned short tr_ccc_sot[132];
-extern UTF_API const unsigned short tr_ccc_sbt[1591];
-
-/* tr_nfcqc: NFC Quick Check (0=Yes, 1=No, 2=Maybe) */
-#define TR_NFCQC_START_STATE (0)
-#define TR_NFCQC_ACCEPTING_STATES_START (60)
-extern UTF_API const unsigned char  tr_nfcqc_itt[256];
-extern UTF_API const unsigned short tr_nfcqc_sot[60];
-extern UTF_API const unsigned char  tr_nfcqc_sbt[714];
+/* tr_ccc_nfcqc: Combined CCC + NFC_QC in one DFA.
+ * Result encoding: value = ccc * 3 + nfcqc.
+ * Decode: ccc = value / 3, nfcqc = value % 3.
+ */
+#define TR_CCC_NFCQC_START_STATE (0)
+#define TR_CCC_NFCQC_ACCEPTING_STATES_START (164)
+extern UTF_API const unsigned char  tr_ccc_nfcqc_itt[256];
+extern UTF_API const unsigned short tr_ccc_nfcqc_sot[164];
+extern UTF_API const unsigned short tr_ccc_nfcqc_sbt[2131];
 
 /* tr_nfd: NFD decomposition */
 #define TR_NFD_START_STATE (0)

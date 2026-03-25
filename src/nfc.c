@@ -145,49 +145,23 @@ static int RunIntegerDFA_u16(
     return (iState >= nAcceptStart) ? iState - nAcceptStart : nDefault;
 }
 
-/* Run integer DFA with unsigned char SBT. */
-static int RunIntegerDFA_u8(
-    const unsigned char *itt,
-    const unsigned short *sot,
-    const unsigned char *sbt,
-    int nStartState, int nAcceptStart, int nDefault,
-    const unsigned char *pStart, const unsigned char *pEnd)
-{
-    int iState = nStartState;
-    const unsigned char *p = pStart;
-    while (p < pEnd && iState < nAcceptStart) {
-        unsigned char ch = *p++;
-        unsigned char iColumn = itt[ch];
-        unsigned short iOffset = sot[iState];
-        for (;;) {
-            int y = sbt[iOffset];
-            if (y < 128) {
-                if (iColumn < y) { iState = sbt[iOffset + 1]; break; }
-                iColumn = (unsigned char)(iColumn - y);
-                iOffset += 2;
-            } else {
-                y = 256 - y;
-                if (iColumn < y) { iState = sbt[iOffset + iColumn + 1]; break; }
-                iColumn = (unsigned char)(iColumn - y);
-                iOffset = (unsigned short)(iOffset + y + 1);
-            }
-        }
-    }
-    return (iState >= nAcceptStart) ? iState - nAcceptStart : nDefault;
-}
-
 static int GetCCC(const unsigned char *pStart, const unsigned char *pEnd)
 {
-    return RunIntegerDFA_u16(tr_ccc_itt, tr_ccc_sot, tr_ccc_sbt,
-        TR_CCC_START_STATE, TR_CCC_ACCEPTING_STATES_START, 0,
-        pStart, pEnd);
+    return RunIntegerDFA_u16(tr_ccc_nfcqc_itt, tr_ccc_nfcqc_sot, tr_ccc_nfcqc_sbt,
+        TR_CCC_NFCQC_START_STATE, TR_CCC_NFCQC_ACCEPTING_STATES_START, 0,
+        pStart, pEnd) / 3;
 }
 
-static int GetNFCQC(const unsigned char *pStart, const unsigned char *pEnd)
+/* Combined CCC + NFC_QC lookup — single DFA traversal instead of two. */
+static int GetCCCandNFCQC(const unsigned char *pStart, const unsigned char *pEnd,
+                           int *pCCC, int *pNFCQC)
 {
-    return RunIntegerDFA_u8(tr_nfcqc_itt, tr_nfcqc_sot, tr_nfcqc_sbt,
-        TR_NFCQC_START_STATE, TR_NFCQC_ACCEPTING_STATES_START, 0,
+    int combined = RunIntegerDFA_u16(tr_ccc_nfcqc_itt, tr_ccc_nfcqc_sot, tr_ccc_nfcqc_sbt,
+        TR_CCC_NFCQC_START_STATE, TR_CCC_NFCQC_ACCEPTING_STATES_START, 0,
         pStart, pEnd);
+    *pCCC   = combined / 3;
+    *pNFCQC = combined % 3;
+    return combined;
 }
 
 static const co_string_desc *GetNFD(const unsigned char *p, int *bXor)
@@ -472,10 +446,9 @@ int utf_nfc_is_nfc(const unsigned char *src, size_t nSrc)
         int n = utf8_cplen(p, pEnd);
         if (0 == n) return 0;
 
-        int qc = GetNFCQC(p, p + n);
+        int ccc, qc;
+        GetCCCandNFCQC(p, p + n, &ccc, &qc);
         if (0 != qc) return 0;  /* No or Maybe */
-
-        int ccc = GetCCC(p, p + n);
         if (ccc != 0 && lastCCC > ccc) return 0;
 
         lastCCC = ccc;
@@ -513,8 +486,8 @@ void utf_nfc_normalize(const unsigned char *src, size_t nSrc,
             continue;
         }
 
-        int qc = GetNFCQC(p, p + n);
-        int ccc = GetCCC(p, p + n);
+        int ccc, qc;
+        GetCCCandNFCQC(p, p + n, &ccc, &qc);
 
         if (0 == qc && (0 == ccc || lastCCC <= ccc)) {
             /* Clean code point — pass through. */
@@ -543,11 +516,9 @@ void utf_nfc_normalize(const unsigned char *src, size_t nSrc,
             if (*p < 0x80) break;  /* ASCII = clean starter */
             int n2 = utf8_cplen(p, pEnd);
             if (0 == n2) { p++; continue; }
-            int ccc2 = GetCCC(p, p + n2);
-            if (0 == ccc2) {
-                int qc2 = GetNFCQC(p, p + n2);
-                if (0 == qc2) break;  /* Clean starter: end of dirty segment */
-            }
+            int ccc2, qc2;
+            GetCCCandNFCQC(p, p + n2, &ccc2, &qc2);
+            if (0 == ccc2 && 0 == qc2) break;  /* Clean starter: end of dirty segment */
             p += n2;
         }
 

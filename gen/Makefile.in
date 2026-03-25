@@ -66,6 +66,9 @@ tr_ccc.txt: gen_ccc.pl UnicodeData.txt
 tr_nfcqc.txt: gen_nfcqc.pl DerivedNormalizationProps.txt
 	perl gen_nfcqc.pl > tr_nfcqc.txt
 
+tr_ccc_nfcqc.txt: gen_ccc_nfcqc.pl tr_ccc.txt tr_nfcqc.txt
+	perl gen_ccc_nfcqc.pl > tr_ccc_nfcqc.txt
+
 tr_nfd.txt: gen_nfd.pl Decompositions.txt
 	perl gen_nfd.pl > tr_nfd.txt
 
@@ -83,7 +86,7 @@ tr_ducet.txt tr_ducet_contract.txt ../mux/src/ducet_cetable.h: gen_ducet.pl allk
 
 # --- C++ tables (libmux.so) ---
 #
-COMMON_DEPS = classify integers strings pairs cl_Printable.txt cl_Alpha.txt cl_Digit.txt cl_Alnum.txt cl_AttrNameInitial.txt cl_AttrName.txt cl_PrivateUse.txt tr_utf8_ascii.txt tr_utf8_cp437.txt tr_utf8_latin1.txt tr_utf8_latin2.txt tr_Color.txt tr_tolower.txt tr_toupper.txt tr_totitle.txt cl_8859_1.txt cl_8859_2.txt tr_ccc.txt tr_nfcqc.txt tr_nfd.txt tr_compose.txt tr_gcb.txt cl_ExtPict.txt tr_ducet.txt tr_ducet_contract.txt tr_widths.txt
+COMMON_DEPS = classify integers strings pairs cl_Printable.txt cl_Alpha.txt cl_Digit.txt cl_Alnum.txt cl_AttrNameInitial.txt cl_AttrName.txt cl_PrivateUse.txt tr_utf8_ascii.txt tr_utf8_cp437.txt tr_utf8_latin1.txt tr_utf8_latin2.txt tr_Color.txt tr_tolower.txt tr_toupper.txt tr_totitle.txt cl_8859_1.txt cl_8859_2.txt tr_ccc.txt tr_nfcqc.txt tr_ccc_nfcqc.txt tr_nfd.txt tr_compose.txt tr_gcb.txt cl_ExtPict.txt tr_ducet.txt tr_ducet_contract.txt tr_widths.txt
 
 $(CPP_H) $(CPP_CPP): $(COMMON_DEPS)
 	-rm -f $(CPP_CPP) $(CPP_H)
@@ -113,6 +116,7 @@ $(CPP_H) $(CPP_CPP): $(COMMON_DEPS)
 	./integers -o $(CPP_CPP) -i $(CPP_H) -d 0 tr_color tr_Color.txt
 	./integers -o $(CPP_CPP) -i $(CPP_H) -d 0 tr_ccc tr_ccc.txt
 	./integers -o $(CPP_CPP) -i $(CPP_H) -d 0 tr_nfcqc tr_nfcqc.txt
+	./integers -o $(CPP_CPP) -i $(CPP_H) -d 0 tr_ccc_nfcqc tr_ccc_nfcqc.txt
 	./strings  -o $(CPP_CPP) -i $(CPP_H) -d tr_nfd tr_nfd.txt
 	./pairs    -o $(CPP_CPP) -i $(CPP_H) tr_nfc_compose tr_compose.txt
 	./integers -o $(CPP_CPP) -i $(CPP_H) -d 0 tr_gcb tr_gcb.txt

@@ -2,7 +2,7 @@
 
 A grab-and-go Unicode library built on compressed DFAs and Ragel -G2
 state machines.  Processes UTF-8 directly — no conversion to UTF-16
-and back.  No malloc.  No dependencies.  586 KB.
+and back.  No malloc.  No dependencies.  685 KB.
 
 Unicode 16.0.  MIT licensed.
 
@@ -32,21 +32,21 @@ scenarios: **UTF-8 input** (libutf native — no conversion) and
 
 | Operation | libutf | ICU 74.2 | Ratio |
 |-----------|--------|----------|-------|
-| Grapheme segmentation | 948 ms | 5,704 ms | **6.0x faster** |
-| NFC normalization | 251 ms | 359 ms | **1.4x faster** |
-| Case mapping (toupper) | 1,017 ms | 1,216 ms | **1.2x faster** |
-| DUCET collation | 361 ms | 296 ms | ICU 1.2x faster |
+| NFC normalization | 84 ms | 120 ms | **1.4x faster** |
+| NFC quick-check | 197 ms | 384 ms | **1.9x faster** |
+| DUCET collation | 121 ms | 101 ms | ICU 1.2x faster |
 
 ### Core-to-core (each library in its native encoding)
 
 | Operation | libutf (UTF-8) | ICU (UTF-16) | Ratio |
 |-----------|----------------|--------------|-------|
-| NFC normalization | 251 ms | 279 ms | **libutf 1.1x faster** |
-| DUCET collation | 361 ms | 169 ms | ICU 2.1x faster |
+| NFC normalization | 84 ms | 92 ms | **libutf 1.1x faster** |
+| DUCET collation | 121 ms | 58 ms | ICU 2.1x faster |
 
 NFC normalization is faster than ICU even core-to-core, thanks to
-incremental normalization that copies clean segments directly and
-only decomposes/recomposes dirty segments.
+a combined CCC+NFC_QC DFA (single lookup instead of two per code
+point), plus incremental normalization that copies clean segments
+directly and only decomposes/recomposes dirty segments.
 
 ICU's collation engine wins core-to-core thanks to its specialized
 fast-Latin comparison path.  With UTF-8 input, the gap narrows to
@@ -56,9 +56,9 @@ fast-Latin comparison path.  With UTF-8 input, the gap narrows to
 
 | | Size |
 |---|---|
-| **libutf.a** (stripped) | **586 KB** |
+| **libutf.a** (stripped) | **685 KB** |
 | libicuuc.a + libicui18n.a + libicudata.a | 42,326 KB |
-| **Ratio** | **72x smaller** |
+| **Ratio** | **62x smaller** |
 
 ## Correctness
 
