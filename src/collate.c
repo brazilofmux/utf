@@ -695,18 +695,63 @@ static int FastLatinCmp(const unsigned char *a, size_t nA,
     return 1;
 }
 
+static int FastLatinCmpCI(const unsigned char *a, size_t nA,
+                          const unsigned char *b, size_t nB,
+                          int *pResult)
+{
+    EnsureLatinCache();
+
+    const unsigned char *pa = a, *paEnd = a + nA;
+    const unsigned char *pb = b, *pbEnd = b + nB;
+
+    while (pa < paEnd && pb < pbEnd) {
+        while (pa < paEnd && pb < pbEnd && *pa < 0x80 && *pa == *pb) {
+            pa++;
+            pb++;
+        }
+        if (pa >= paEnd || pb >= pbEnd) break;
+
+        uint32_t ceA = NextLatinCE(&pa, paEnd);
+        if (0 == ceA) return 0;
+        uint32_t ceB = NextLatinCE(&pb, pbEnd);
+        if (0 == ceB) return 0;
+
+        unsigned short pA = CE_PRIMARY(ceA), pB = CE_PRIMARY(ceB);
+        if (pA != pB) { *pResult = (pA < pB) ? -1 : 1; return 1; }
+
+        unsigned short sA = CE_SECONDARY(ceA), sB = CE_SECONDARY(ceB);
+        if (sA != sB) { *pResult = (sA < sB) ? -1 : 1; return 1; }
+    }
+
+    if (pa < paEnd) {
+        if (0 == NextLatinCE(&pa, paEnd)) return 0;
+        *pResult = 1; return 1;
+    }
+    if (pb < pbEnd) {
+        if (0 == NextLatinCE(&pb, pbEnd)) return 0;
+        *pResult = -1; return 1;
+    }
+
+    *pResult = 0;
+    return 1;
+}
+
 static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
                             unsigned char *key, size_t nKeyMax,
                             size_t *pPos, int bCaseSensitive)
 {
     EnsureLatinCache();
+    size_t startPos = *pPos;
 
     const unsigned char *p = src;
     const unsigned char *pEnd = src + nSrc;
 
     while (p < pEnd) {
         uint32_t ce = NextLatinCE(&p, pEnd);
-        if (0 == ce) return 0;
+        if (0 == ce) {
+            *pPos = startPos;
+            return 0;
+        }
         AppendBE16(key, nKeyMax, pPos, CE_PRIMARY(ce));
     }
     AppendBE16(key, nKeyMax, pPos, 0);
@@ -722,6 +767,10 @@ static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
         p = src;
         while (p < pEnd) {
             uint32_t ce = NextLatinCE(&p, pEnd);
+            if (0 == ce) {
+                *pPos = startPos;
+                return 0;
+            }
             AppendByte(key, nKeyMax, pPos, (unsigned char)CE_TERTIARY(ce));
         }
         AppendByte(key, nKeyMax, pPos, 0);
@@ -805,6 +854,12 @@ int utf_collate_cmp_ci(const unsigned char *a, size_t nA,
 {
     if (nA == nB && (a == b || 0 == memcmp(a, b, nA)))
         return 0;
+
+    {
+        int fastResult;
+        if (FastLatinCmpCI(a, nA, b, nB, &fastResult))
+            return fastResult;
+    }
 
     {
         uint32_t cesA[MAX_CMP_CES], cesB[MAX_CMP_CES];

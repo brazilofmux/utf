@@ -51,6 +51,19 @@ static void run_cmp_case(const cmp_case_t *tc, int iterations)
     (void)sink;
 }
 
+static void run_cmp_ci_case(const cmp_case_t *tc, int iterations)
+{
+    volatile int sink = 0;
+    double t0 = now_sec();
+    for (int i = 0; i < iterations; i++) {
+        sink += utf_collate_cmp_ci(tc->a, tc->nA, tc->b, tc->nB);
+    }
+    double t1 = now_sec();
+    printf("  %-24s %10.1f ns/call\n",
+           tc->name, (t1 - t0) * 1e9 / iterations);
+    (void)sink;
+}
+
 static void run_sortkey_case(const char *name,
                              const unsigned char *s, size_t nS,
                              int iterations)
@@ -60,6 +73,22 @@ static void run_sortkey_case(const char *name,
     double t0 = now_sec();
     for (int i = 0; i < iterations; i++) {
         sink += utf_collate_sortkey(s, nS, key, sizeof(key));
+    }
+    double t1 = now_sec();
+    printf("  %-24s %10.1f ns/call\n",
+           name, (t1 - t0) * 1e9 / iterations);
+    (void)sink;
+}
+
+static void run_sortkey_ci_case(const char *name,
+                                const unsigned char *s, size_t nS,
+                                int iterations)
+{
+    volatile size_t sink = 0;
+    unsigned char key[16384];
+    double t0 = now_sec();
+    for (int i = 0; i < iterations; i++) {
+        sink += utf_collate_sortkey_ci(s, nS, key, sizeof(key));
     }
     double t1 = now_sec();
     printf("  %-24s %10.1f ns/call\n",
@@ -101,11 +130,21 @@ int main(int argc, char **argv)
     for (size_t i = 0; i < sizeof(cmp_cases) / sizeof(cmp_cases[0]); i++)
         run_cmp_case(&cmp_cases[i], iterations);
 
+    printf("\n[utf_collate_cmp_ci]\n");
+    for (size_t i = 0; i < sizeof(cmp_cases) / sizeof(cmp_cases[0]); i++)
+        run_cmp_ci_case(&cmp_cases[i], iterations);
+
     printf("\n[utf_collate_sortkey]\n");
     run_sortkey_case("sortkey_latin", latin_a, sizeof(latin_a) - 1, iterations);
     run_sortkey_case("sortkey_equal", equal_a, sizeof(equal_a) - 1, iterations);
     run_sortkey_case("sortkey_cjk", cjk_a, sizeof(cjk_a) - 1, iterations);
     run_sortkey_case("sortkey_long", long_a, 5001, iterations / 10 > 0 ? iterations / 10 : 1);
+
+    printf("\n[utf_collate_sortkey_ci]\n");
+    run_sortkey_ci_case("sortkey_ci_latin", latin_a, sizeof(latin_a) - 1, iterations);
+    run_sortkey_ci_case("sortkey_ci_equal", equal_a, sizeof(equal_a) - 1, iterations);
+    run_sortkey_ci_case("sortkey_ci_cjk", cjk_a, sizeof(cjk_a) - 1, iterations);
+    run_sortkey_ci_case("sortkey_ci_long", long_a, 5001, iterations / 10 > 0 ? iterations / 10 : 1);
 
     return 0;
 }

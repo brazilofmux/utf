@@ -155,6 +155,50 @@ static void test_sortkey_ci_matches_cmp_ci(const char *label,
     }
 }
 
+static void test_malformed_consistency(const char *label,
+                                       const unsigned char *a, size_t nA,
+                                       const unsigned char *b, size_t nB)
+{
+    unsigned char ka[16384], kb[16384];
+    size_t kla = utf_collate_sortkey(a, nA, ka, sizeof(ka));
+    size_t klb = utf_collate_sortkey(b, nB, kb, sizeof(kb));
+    int key_cmp = memcmp(ka, kb, (kla < klb) ? kla : klb);
+    if (0 == key_cmp) key_cmp = (kla > klb) - (kla < klb);
+    int key_sign = sign(key_cmp);
+
+    int cmp_sign = sign(utf_collate_cmp(a, nA, b, nB));
+
+    if (key_sign != cmp_sign) {
+        printf("  FAIL malformed %s: cmp=%d sortkey=%d\n",
+               label, cmp_sign, key_sign);
+        g_fail++;
+    } else {
+        g_pass++;
+    }
+}
+
+static void test_malformed_ci_consistency(const char *label,
+                                          const unsigned char *a, size_t nA,
+                                          const unsigned char *b, size_t nB)
+{
+    unsigned char ka[16384], kb[16384];
+    size_t kla = utf_collate_sortkey_ci(a, nA, ka, sizeof(ka));
+    size_t klb = utf_collate_sortkey_ci(b, nB, kb, sizeof(kb));
+    int key_cmp = memcmp(ka, kb, (kla < klb) ? kla : klb);
+    if (0 == key_cmp) key_cmp = (kla > klb) - (kla < klb);
+    int key_sign = sign(key_cmp);
+
+    int cmp_sign = sign(utf_collate_cmp_ci(a, nA, b, nB));
+
+    if (key_sign != cmp_sign) {
+        printf("  FAIL malformed_ci %s: cmp=%d sortkey=%d\n",
+               label, cmp_sign, key_sign);
+        g_fail++;
+    } else {
+        g_pass++;
+    }
+}
+
 static void test_ci_bytes(const char *label,
                           const unsigned char *a, size_t nA,
                           const unsigned char *b, size_t nB,
@@ -305,6 +349,41 @@ int main(void)
         longb[257] = '\0';
         test_cmp_bytes("long_tail_nonlatin_primary",
                        longa, 258, longb, 257, coll);
+    }
+
+    printf("\n[malformed utf8 consistency]\n");
+
+    {
+        const unsigned char truncated_a[] = { 'a', 0xC3 };
+        const unsigned char valid_b[] = "a";
+        test_malformed_consistency("truncated_two_byte",
+                                   truncated_a, sizeof(truncated_a),
+                                   valid_b, strlen((const char *)valid_b));
+        test_malformed_ci_consistency("truncated_two_byte_ci",
+                                      truncated_a, sizeof(truncated_a),
+                                      valid_b, strlen((const char *)valid_b));
+    }
+
+    {
+        const unsigned char overlong_a[] = { 'a', 0xC0, 0xAF };
+        const unsigned char plain_b[] = { 'a', '/' };
+        test_malformed_consistency("overlong_slash",
+                                   overlong_a, sizeof(overlong_a),
+                                   plain_b, sizeof(plain_b));
+        test_malformed_ci_consistency("overlong_slash_ci",
+                                      overlong_a, sizeof(overlong_a),
+                                      plain_b, sizeof(plain_b));
+    }
+
+    {
+        const unsigned char surrogate_a[] = { 'a', 0xED, 0xA0, 0x80 };
+        const unsigned char plain_b[] = { 'a', 'b' };
+        test_malformed_consistency("surrogate_half",
+                                   surrogate_a, sizeof(surrogate_a),
+                                   plain_b, sizeof(plain_b));
+        test_malformed_ci_consistency("surrogate_half_ci",
+                                      surrogate_a, sizeof(surrogate_a),
+                                      plain_b, sizeof(plain_b));
     }
 
     ucol_close(coll);
