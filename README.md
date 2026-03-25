@@ -32,25 +32,29 @@ scenarios: **UTF-8 input** (libutf native — no conversion) and
 
 | Operation | libutf | ICU 74.2 | Ratio |
 |-----------|--------|----------|-------|
-| NFC normalization | 84 ms | 120 ms | **1.4x faster** |
-| NFC quick-check | 197 ms | 384 ms | **1.9x faster** |
-| DUCET collation | 121 ms | 101 ms | ICU 1.2x faster |
+| NFC normalization | 85 ms | 119 ms | **1.4x faster** |
+| NFC quick-check | 203 ms | 388 ms | **1.9x faster** |
+| DUCET collation | 120 ms | 100 ms | ICU 1.2x faster |
 
 ### Core-to-core (each library in its native encoding)
 
 | Operation | libutf (UTF-8) | ICU (UTF-16) | Ratio |
 |-----------|----------------|--------------|-------|
-| NFC normalization | 84 ms | 92 ms | **libutf 1.1x faster** |
-| DUCET collation | 121 ms | 58 ms | ICU 2.1x faster |
+| NFC normalization | 85 ms | 93 ms | **libutf 1.1x faster** |
+| DUCET collation | 120 ms | 58 ms | ICU 2.1x faster |
 
 NFC normalization is faster than ICU even core-to-core, thanks to
 a combined CCC+NFC_QC DFA (single lookup instead of two per code
 point), plus incremental normalization that copies clean segments
 directly and only decomposes/recomposes dirty segments.
 
-ICU's collation engine wins core-to-core thanks to its specialized
-fast-Latin comparison path.  With UTF-8 input, the gap narrows to
-1.2x because ICU pays for UTF-8 → UTF-16 conversion.
+DUCET collation has a Latin fast path that compares weights inline
+for U+0000..U+017F without DFA traversal or CE array allocation,
+plus fast implicit weights for CJK Unified Ideographs.  ICU's
+collation engine wins core-to-core thanks to its UTF-16 encoding
+advantage (direct array indexing vs. byte-level DFA traversal).
+With UTF-8 input, the gap narrows to 1.2x because ICU pays for
+UTF-8 → UTF-16 conversion.
 
 ## Size
 

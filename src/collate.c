@@ -26,7 +26,12 @@
 #define CE_SECONDARY(w) (((w) >> 5) & 0x07FF)
 #define CE_TERTIARY(w)  ((w) & 0x1F)
 
-#define MAX_SORT_CES 4096
+/* CE buffer size for comparison.  256 CEs supports strings up to ~200
+ * characters, which covers the vast majority of real-world comparisons.
+ * Sort key generation uses a larger buffer (MAX_SORTKEY_CES).
+ */
+#define MAX_CMP_CES 256
+#define MAX_SORTKEY_CES 4096
 
 /* --- UTF-8 helpers --- */
 
@@ -226,7 +231,11 @@ static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
     int ceIndex = 0;
     const unsigned char *pConsumed = pNext;
 
-    if (pNext < pEnd) {
+    /* Contraction check: only if the lead byte maps to a non-default
+     * column in the contraction DFA.  Column 0 is the default and can
+     * never reach an accepting state, so skip the DFA entirely.
+     */
+    if (tr_ducet_contract_itt[*p] != 0 && pNext < pEnd) {
         const unsigned char *pNext2 = utf8_advance_c(pNext, pEnd);
         ceIndex = GetContraction(p, pNext, pNext, pNext2);
         if (0 != ceIndex) pConsumed = pNext2;
@@ -254,30 +263,44 @@ static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
     return nCEs;
 }
 
-/* --- ASCII CE cache --- */
+/* --- Latin CE cache --- */
 
-/* Precomputed CE for each ASCII byte.  Most printable ASCII characters
- * have exactly one CE in DUCET.  A value of 0 means "use slow path".
+/* Precomputed CE for U+0000..U+017F (Basic Latin + Latin-1 Supplement +
+ * Latin Extended-A).  Most characters in this range have exactly one CE
+ * in DUCET.  A value of 0 means "use slow path" (multi-CE or unmapped).
+ *
+ * This is the key fast path: Latin text skips DFA traversal, contraction
+ * checks, and UTF-8 validation entirely — one table lookup per character.
  */
-static uint32_t s_ascii_ce[128];
-static int      s_ascii_ce_init;
+#define LATIN_CE_LIMIT 0x180
+static uint32_t s_latin_ce[LATIN_CE_LIMIT];
+static int      s_latin_ce_init;
 
-static void InitASCIICache(void)
+static void InitLatinCache(void)
 {
-    for (int i = 0; i < 128; i++) {
-        unsigned char byte = (unsigned char)i;
-        int idx = GetDUCET(&byte, &byte + 1);
+    for (int cp = 0; cp < LATIN_CE_LIMIT; cp++) {
+        unsigned char buf[2];
+        int n;
+        if (cp < 0x80) {
+            buf[0] = (unsigned char)cp;
+            n = 1;
+        } else {
+            buf[0] = (unsigned char)(0xC0 | (cp >> 6));
+            buf[1] = (unsigned char)(0x80 | (cp & 0x3F));
+            n = 2;
+        }
+        int idx = GetDUCET(buf, buf + n);
         if (0 != idx) {
             int start = ducet_ce_offset[idx];
             int end   = ducet_ce_offset[idx + 1];
             if (end - start == 1) {
-                s_ascii_ce[i] = ducet_ce_weights[start];
+                s_latin_ce[cp] = ducet_ce_weights[start];
                 continue;
             }
         }
-        s_ascii_ce[i] = 0;
+        s_latin_ce[cp] = 0;
     }
-    s_ascii_ce_init = 1;
+    s_latin_ce_init = 1;
 }
 
 /* --- CE collection (full string) --- */
@@ -285,7 +308,7 @@ static void InitASCIICache(void)
 static int CollectCEs(const unsigned char *src, size_t nSrc,
                       uint32_t *ces, int maxCEs)
 {
-    if (!s_ascii_ce_init) InitASCIICache();
+    if (!s_latin_ce_init) InitLatinCache();
 
     const unsigned char *p = src;
     const unsigned char *pEnd = src + nSrc;
@@ -294,7 +317,7 @@ static int CollectCEs(const unsigned char *src, size_t nSrc,
     while (p < pEnd && nCEs < maxCEs) {
         /* ASCII fast path: single table lookup, no DFA. */
         if (*p < 0x80) {
-            uint32_t ce = s_ascii_ce[*p];
+            uint32_t ce = s_latin_ce[*p];
             if (0 != ce) {
                 ces[nCEs++] = ce;
                 p++;
@@ -302,9 +325,120 @@ static int CollectCEs(const unsigned char *src, size_t nSrc,
             }
             /* Rare: ASCII with 0 or multiple CEs — fall through. */
         }
+        /* Latin 2-byte fast path: U+0080..U+017F (lead bytes 0xC2..0xC5).
+         * Direct decode + table lookup — no DFA, no contraction check.
+         */
+        else if ((unsigned)(*p - 0xC2) <= (0xC5 - 0xC2)
+                 && p + 1 < pEnd && (p[1] & 0xC0) == 0x80) {
+            uint32_t cp = (uint32_t)((*p & 0x1F) << 6) | (p[1] & 0x3F);
+            uint32_t ce = s_latin_ce[cp];
+            if (0 != ce) {
+                ces[nCEs++] = ce;
+                p += 2;
+                continue;
+            }
+        }
+        /* CJK Unified Ideographs fast path: U+4E00..U+9FFF (lead 0xE4..0xE9).
+         * These always use implicit weights — skip the DFA entirely.
+         */
+        else if (*p >= 0xE4 && *p <= 0xE9
+                 && p + 2 < pEnd
+                 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) {
+            uint32_t cp = ((uint32_t)(*p & 0x0F) << 12)
+                        | ((uint32_t)(p[1] & 0x3F) << 6)
+                        | (uint32_t)(p[2] & 0x3F);
+            if (cp >= 0x4E00 && cp <= 0x9FFF && nCEs + 1 < maxCEs) {
+                unsigned short aaaa = 0xFB40 + (unsigned short)(cp >> 15);
+                unsigned short bbbb = (unsigned short)((cp & 0x7FFF) | 0x8000);
+                ces[nCEs++] = ((uint32_t)aaaa << 16) | ((uint32_t)0x0020 << 5) | 0x0002;
+                ces[nCEs++] = (uint32_t)bbbb << 16;
+                p += 3;
+                continue;
+            }
+        }
         nCEs += ExtractCEs(&p, pEnd, ces + nCEs, maxCEs - nCEs);
     }
     return nCEs;
+}
+
+/* --- Latin fast-path comparison --- */
+
+/* Decode next Latin codepoint and return its cached CE.
+ * Returns 0 if the byte is non-Latin or has no single-CE cache entry.
+ */
+static inline uint32_t NextLatinCE(const unsigned char **pp,
+                                    const unsigned char *pEnd)
+{
+    const unsigned char *p = *pp;
+    if (*p < 0x80) {
+        uint32_t ce = s_latin_ce[*p];
+        if (0 != ce) { *pp = p + 1; return ce; }
+        return 0;
+    }
+    if ((unsigned)(*p - 0xC2) <= (0xC5 - 0xC2)
+        && p + 1 < pEnd && (p[1] & 0xC0) == 0x80) {
+        uint32_t cp = (uint32_t)((*p & 0x1F) << 6) | (p[1] & 0x3F);
+        uint32_t ce = s_latin_ce[cp];
+        if (0 != ce) { *pp = p + 2; return ce; }
+    }
+    return 0;
+}
+
+/* Try fast Latin comparison.  If both strings are entirely Latin with
+ * single-CE characters, compare inline without collecting CE arrays.
+ * Returns 1 if the fast path handled it (result in *pResult), 0 if
+ * the caller must fall back to the full UCA path.
+ *
+ * For single-CE Latin, all three weight levels are non-zero, so UCA's
+ * three-pass comparison reduces to a single element-by-element pass
+ * with recorded secondary/tertiary differences.
+ */
+static int FastLatinCmp(const unsigned char *a, size_t nA,
+                        const unsigned char *b, size_t nB,
+                        int *pResult)
+{
+    if (!s_latin_ce_init) InitLatinCache();
+
+    const unsigned char *pa = a, *paEnd = a + nA;
+    const unsigned char *pb = b, *pbEnd = b + nB;
+    int secDiff = 0, tertDiff = 0;
+
+    while (pa < paEnd && pb < pbEnd) {
+        uint32_t ceA = NextLatinCE(&pa, paEnd);
+        if (0 == ceA) return 0;
+        uint32_t ceB = NextLatinCE(&pb, pbEnd);
+        if (0 == ceB) return 0;
+
+        unsigned short pA = CE_PRIMARY(ceA), pB = CE_PRIMARY(ceB);
+        if (pA != pB) { *pResult = (pA < pB) ? -1 : 1; return 1; }
+
+        if (0 == secDiff) {
+            unsigned short sA = CE_SECONDARY(ceA), sB = CE_SECONDARY(ceB);
+            if (sA != sB) { secDiff = (sA < sB) ? -1 : 1; }
+            else if (0 == tertDiff) {
+                unsigned char tA = CE_TERTIARY(ceA), tB = CE_TERTIARY(ceB);
+                if (tA != tB) { tertDiff = (tA < tB) ? -1 : 1; }
+            }
+        }
+    }
+
+    /* One or both strings exhausted at level 1.
+     * Any remaining characters have non-zero primary (Latin guarantee).
+     */
+    if (pa < paEnd) {
+        if (0 == NextLatinCE(&pa, paEnd)) return 0;
+        *pResult = 1; return 1;
+    }
+    if (pb < pbEnd) {
+        if (0 == NextLatinCE(&pb, pbEnd)) return 0;
+        *pResult = -1; return 1;
+    }
+
+    if (0 != secDiff) { *pResult = secDiff; return 1; }
+    if (0 != tertDiff) { *pResult = tertDiff; return 1; }
+
+    *pResult = 0;
+    return 1;
 }
 
 /* --- Public API --- */
@@ -312,9 +446,14 @@ static int CollectCEs(const unsigned char *src, size_t nSrc,
 int utf_collate_cmp(const unsigned char *a, size_t nA,
                     const unsigned char *b, size_t nB)
 {
-    uint32_t cesA[MAX_SORT_CES], cesB[MAX_SORT_CES];
-    int nCEsA = CollectCEs(a, nA, cesA, MAX_SORT_CES);
-    int nCEsB = CollectCEs(b, nB, cesB, MAX_SORT_CES);
+    /* Fast path: Latin-only strings compared inline. */
+    int fastResult;
+    if (FastLatinCmp(a, nA, b, nB, &fastResult))
+        return fastResult;
+
+    uint32_t cesA[MAX_CMP_CES], cesB[MAX_CMP_CES];
+    int nCEsA = CollectCEs(a, nA, cesA, MAX_CMP_CES);
+    int nCEsB = CollectCEs(b, nB, cesB, MAX_CMP_CES);
     int iA, iB;
 
     /* Level 1: primary. */
@@ -402,9 +541,9 @@ int utf_collate_cmp(const unsigned char *a, size_t nA,
 int utf_collate_cmp_ci(const unsigned char *a, size_t nA,
                        const unsigned char *b, size_t nB)
 {
-    uint32_t cesA[MAX_SORT_CES], cesB[MAX_SORT_CES];
-    int nCEsA = CollectCEs(a, nA, cesA, MAX_SORT_CES);
-    int nCEsB = CollectCEs(b, nB, cesB, MAX_SORT_CES);
+    uint32_t cesA[MAX_CMP_CES], cesB[MAX_CMP_CES];
+    int nCEsA = CollectCEs(a, nA, cesA, MAX_CMP_CES);
+    int nCEsB = CollectCEs(b, nB, cesB, MAX_CMP_CES);
     int iA, iB;
 
     /* Level 1: primary. */
@@ -447,8 +586,8 @@ int utf_collate_cmp_ci(const unsigned char *a, size_t nA,
 size_t utf_collate_sortkey(const unsigned char *src, size_t nSrc,
                            unsigned char *key, size_t nKeyMax)
 {
-    uint32_t ces[MAX_SORT_CES];
-    int nCEs = CollectCEs(src, nSrc, ces, MAX_SORT_CES);
+    uint32_t ces[MAX_SORTKEY_CES];
+    int nCEs = CollectCEs(src, nSrc, ces, MAX_SORTKEY_CES);
     size_t pos = 0;
 
     /* Level 1: primary (16-bit big-endian). */
@@ -483,8 +622,8 @@ size_t utf_collate_sortkey(const unsigned char *src, size_t nSrc,
 size_t utf_collate_sortkey_ci(const unsigned char *src, size_t nSrc,
                               unsigned char *key, size_t nKeyMax)
 {
-    uint32_t ces[MAX_SORT_CES];
-    int nCEs = CollectCEs(src, nSrc, ces, MAX_SORT_CES);
+    uint32_t ces[MAX_SORTKEY_CES];
+    int nCEs = CollectCEs(src, nSrc, ces, MAX_SORTKEY_CES);
     size_t pos = 0;
 
     for (int i = 0; i < nCEs; i++) {
