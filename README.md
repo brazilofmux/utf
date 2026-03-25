@@ -19,7 +19,7 @@ cd utf && make && make test
 | CIE97 | `cie97.h` | Perceptual color distance (sRGB → CIELAB) with Kd-tree nearest-neighbor over xterm-256 palette |
 | Grapheme | `grapheme.h` | Extended Grapheme Cluster segmentation (UAX #29) — emoji ZWJ, regional indicators, Hangul |
 | NFC | `nfc.h` | Canonical normalization (UAX #15) with Hangul algorithmic composition |
-| Collation | `collate.h` | DUCET sort (UTS #10) — multi-level comparison and binary sort keys |
+| Collation | `collate.h` | DUCET sort (UTS #10) — multi-level comparison, case-insensitive comparison, and binary sort keys |
 | Tables | `utf_tables.h` | Compressed DFA tables for case mapping, character width, GCB, charset approximation |
 
 ## Performance vs ICU 74.2
@@ -32,16 +32,17 @@ scenarios: **UTF-8 input** (libutf native — no conversion) and
 
 | Operation | libutf | ICU 74.2 | Ratio |
 |-----------|--------|----------|-------|
-| NFC normalization | 85 ms | 119 ms | **1.4x faster** |
-| NFC quick-check | 203 ms | 388 ms | **1.9x faster** |
-| DUCET collation | 120 ms | 100 ms | ICU 1.2x faster |
+| NFC normalization | 84 ms | 119 ms | **1.4x faster** |
+| NFC quick-check | 183 ms | 387 ms | **2.1x faster** |
+| DUCET collation | 80 ms | 98 ms | **1.2x faster** |
+| Grapheme segmentation | 550 ms | 4,900 ms | **8.9x faster** |
 
 ### Core-to-core (each library in its native encoding)
 
 | Operation | libutf (UTF-8) | ICU (UTF-16) | Ratio |
 |-----------|----------------|--------------|-------|
-| NFC normalization | 85 ms | 93 ms | **libutf 1.1x faster** |
-| DUCET collation | 120 ms | 58 ms | ICU 2.1x faster |
+| NFC normalization | 84 ms | 92 ms | **libutf 1.1x faster** |
+| DUCET collation | 80 ms | 56 ms | ICU 1.4x faster |
 
 NFC normalization is faster than ICU even core-to-core, thanks to
 a combined CCC+NFC_QC DFA (single lookup instead of two per code
@@ -50,11 +51,14 @@ directly and only decomposes/recomposes dirty segments.
 
 DUCET collation has a Latin fast path that compares weights inline
 for U+0000..U+017F without DFA traversal or CE array allocation,
-plus fast implicit weights for CJK Unified Ideographs.  ICU's
-collation engine wins core-to-core thanks to its UTF-16 encoding
-advantage (direct array indexing vs. byte-level DFA traversal).
-With UTF-8 input, the gap narrows to 1.2x because ICU pays for
-UTF-8 → UTF-16 conversion.
+plus fast implicit weights for CJK Unified Ideographs.  With UTF-8
+input libutf is 1.2x faster because ICU pays for UTF-8 → UTF-16
+conversion.  Core-to-core, ICU's UTF-16 encoding advantage (direct
+array indexing vs. byte-level DFA traversal) gives it a 1.4x lead.
+
+Grapheme cluster segmentation is 8.9x faster because libutf uses a
+single-pass DFA over raw UTF-8 bytes, while ICU's break iterator
+requires UTF-16 conversion and a more general rule-based engine.
 
 ## Size
 
@@ -74,9 +78,10 @@ as a reference implementation:
   (OHM SIGN, ANGSTROM SIGN), and mixed-script strings.  All match ICU
   byte-for-byte.
 
-- **Collation**: 39 test cases covering primary (base character),
+- **Collation**: 53 test cases covering primary (base character),
   secondary (accent), and tertiary (case) weight levels, plus
-  case-insensitive comparison and sort key consistency.  Includes
+  case-insensitive comparison, sort key consistency, long-string
+  overflow handling, and malformed UTF-8 resilience.  Includes
   canonical equivalence (decomposed and precomposed forms compare
   equal per UCA), CJK implicit weights, Hangul, and cross-script
   ordering.  All match ICU.
@@ -127,7 +132,7 @@ Link against `libutf.a` and `#include` the headers you need:
 ```c
 #include "utf/color_ops.h"   /* co_toupper, co_render_ansi256, ... */
 #include "utf/nfc.h"         /* utf_nfc_normalize, utf_nfc_is_nfc */
-#include "utf/collate.h"     /* utf_collate_cmp, utf_collate_sortkey */
+#include "utf/collate.h"     /* utf_collate_cmp, utf_collate_cmp_ci, utf_collate_sortkey */
 #include "utf/grapheme.h"    /* utf_grapheme_next, utf_grapheme_count */
 #include "utf/cie97.h"       /* co_nearest_xterm256, co_nearest_xterm16 */
 ```
