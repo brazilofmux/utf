@@ -50,42 +50,91 @@ int main(int argc, char **argv)
     printf("Grapheme Cluster Segmentation Benchmark\n");
     printf("Iterations: %d per string, %d strings\n\n", iterations, nStrings);
 
-    /* --- libutf --- */
+    /* Pre-convert to UTF-16 and cache lengths. */
+    UErrorCode err = U_ZERO_ERROR;
+    UChar u16[8][1024];
+    int32_t u16_len[8];
+    size_t utf8_len[8];
+    for (int s = 0; s < nStrings; s++) {
+        utf8_len[s] = strlen(test_strings[s]);
+        u_strFromUTF8(u16[s], 1024, &u16_len[s],
+                      test_strings[s], (int32_t)utf8_len[s], &err);
+    }
+
+    /* Create a reusable break iterator. */
+    UBreakIterator *bi = ubrk_open(UBRK_CHARACTER, "", u16[0], u16_len[0], &err);
+    if (U_FAILURE(err)) {
+        fprintf(stderr, "ICU error: %s\n", u_errorName(err));
+        return 1;
+    }
+
+    /* --- Scenario 1: UTF-8 input (libutf native, ICU pays for conversion) --- */
+    printf("--- Scenario 1: UTF-8 input ---\n");
+
+    /* libutf: native UTF-8. */
     double t0 = now_sec();
     for (int iter = 0; iter < iterations; iter++) {
         for (int s = 0; s < nStrings; s++) {
             sink += utf_grapheme_count((const unsigned char *)test_strings[s],
-                                       strlen(test_strings[s]));
+                                       utf8_len[s]);
         }
     }
     double t1 = now_sec();
     double libutf_ms = (t1 - t0) * 1000.0;
 
-    /* --- ICU --- */
-    UErrorCode err = U_ZERO_ERROR;
-
+    /* ICU: UTF-8 -> UTF-16 -> segment. */
     t0 = now_sec();
     for (int iter = 0; iter < iterations; iter++) {
         for (int s = 0; s < nStrings; s++) {
             UChar ustr[1024];
             int32_t ulen;
             u_strFromUTF8(ustr, 1024, &ulen,
-                          test_strings[s], (int32_t)strlen(test_strings[s]), &err);
-
-            UBreakIterator *bi = ubrk_open(UBRK_CHARACTER, "", ustr, ulen, &err);
+                          test_strings[s], (int32_t)utf8_len[s], &err);
+            ubrk_setText(bi, ustr, ulen, &err);
             size_t count = 0;
             while (ubrk_next(bi) != UBRK_DONE) count++;
             sink += count;
-            ubrk_close(bi);
         }
     }
     t1 = now_sec();
-    double icu_ms = (t1 - t0) * 1000.0;
+    double icu_utf8_ms = (t1 - t0) * 1000.0;
 
-    printf("%-20s %10.1f ms\n", "libutf", libutf_ms);
-    printf("%-20s %10.1f ms\n", "ICU 74.2", icu_ms);
-    printf("%-20s %10.1fx\n", "Speedup", icu_ms / libutf_ms);
+    printf("  %-24s %10.1f ms\n", "libutf (native)", libutf_ms);
+    printf("  %-24s %10.1f ms\n", "ICU (convert+segment)", icu_utf8_ms);
+    if (icu_utf8_ms >= libutf_ms)
+        printf("  %-24s %10.1fx faster\n", "libutf", icu_utf8_ms / libutf_ms);
+    else
+        printf("  %-24s %10.1fx faster\n", "ICU", libutf_ms / icu_utf8_ms);
 
+    /* --- Scenario 2: core-to-core (each library in its native encoding) --- */
+    printf("\n--- Scenario 2: core-to-core ---\n");
+
+    /* ICU: native UTF-16, reused iterator. */
+    t0 = now_sec();
+    for (int iter = 0; iter < iterations; iter++) {
+        for (int s = 0; s < nStrings; s++) {
+            ubrk_setText(bi, u16[s], u16_len[s], &err);
+            size_t count = 0;
+            while (ubrk_next(bi) != UBRK_DONE) count++;
+            sink += count;
+        }
+    }
+    t1 = now_sec();
+    double icu_native_ms = (t1 - t0) * 1000.0;
+
+    printf("  %-24s %10.1f ms\n", "libutf (native UTF-8)", libutf_ms);
+    printf("  %-24s %10.1f ms\n", "ICU (native UTF-16)", icu_native_ms);
+    if (icu_native_ms >= libutf_ms)
+        printf("  %-24s %10.1fx faster\n", "libutf", icu_native_ms / libutf_ms);
+    else
+        printf("  %-24s %10.1fx faster\n", "ICU", libutf_ms / icu_native_ms);
+
+    printf("\n--- Summary ---\n");
+    printf("  libutf (UTF-8 native):           %8.1f ms\n", libutf_ms);
+    printf("  ICU (UTF-8 convert+segment):     %8.1f ms\n", icu_utf8_ms);
+    printf("  ICU (UTF-16 native):             %8.1f ms\n", icu_native_ms);
+
+    ubrk_close(bi);
     (void)sink;
     return 0;
 }

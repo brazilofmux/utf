@@ -2,7 +2,7 @@
 
 A grab-and-go Unicode library built on compressed DFAs and Ragel -G2
 state machines.  Processes UTF-8 directly — no conversion to UTF-16
-and back.  No malloc.  No dependencies.  685 KB.
+and back.  No malloc.  No dependencies.  592 KB.
 
 Unicode 16.0.  MIT licensed.
 
@@ -35,7 +35,7 @@ scenarios: **UTF-8 input** (libutf native — no conversion) and
 | NFC normalization | 84 ms | 119 ms | **1.4x faster** |
 | NFC quick-check | 183 ms | 387 ms | **2.1x faster** |
 | DUCET collation | 80 ms | 98 ms | **1.2x faster** |
-| Grapheme segmentation | 550 ms | 4,900 ms | **8.9x faster** |
+| Grapheme segmentation | 560 ms | 770 ms | **1.4x faster** |
 
 ### Core-to-core (each library in its native encoding)
 
@@ -43,6 +43,7 @@ scenarios: **UTF-8 input** (libutf native — no conversion) and
 |-----------|----------------|--------------|-------|
 | NFC normalization | 84 ms | 92 ms | **libutf 1.1x faster** |
 | DUCET collation | 80 ms | 56 ms | ICU 1.4x faster |
+| Grapheme segmentation | 560 ms | 690 ms | **libutf 1.2x faster** |
 
 NFC normalization is faster than ICU even core-to-core, thanks to
 a combined CCC+NFC_QC DFA (single lookup instead of two per code
@@ -56,17 +57,18 @@ input libutf is 1.2x faster because ICU pays for UTF-8 → UTF-16
 conversion.  Core-to-core, ICU's UTF-16 encoding advantage (direct
 array indexing vs. byte-level DFA traversal) gives it a 1.4x lead.
 
-Grapheme cluster segmentation is 8.9x faster because libutf uses a
-single-pass DFA over raw UTF-8 bytes, while ICU's break iterator
-requires UTF-16 conversion and a more general rule-based engine.
+Grapheme cluster segmentation is 1.4x faster on UTF-8 input and
+1.2x faster core-to-core.  libutf's single-pass DFA over raw UTF-8
+bytes avoids both the UTF-16 conversion and the overhead of ICU's
+general-purpose rule-based break engine.
 
 ## Size
 
 | | Size |
 |---|---|
-| **libutf.a** (stripped) | **685 KB** |
+| **libutf.a** (stripped) | **592 KB** |
 | libicuuc.a + libicui18n.a + libicudata.a | 42,326 KB |
-| **Ratio** | **62x smaller** |
+| **Ratio** | **71x smaller** |
 
 ## Correctness
 
@@ -78,13 +80,11 @@ as a reference implementation:
   (OHM SIGN, ANGSTROM SIGN), and mixed-script strings.  All match ICU
   byte-for-byte.
 
-- **Collation**: 53 test cases covering primary (base character),
-  secondary (accent), and tertiary (case) weight levels, plus
-  case-insensitive comparison, sort key consistency, long-string
-  overflow handling, and malformed UTF-8 resilience.  Includes
-  canonical equivalence (decomposed and precomposed forms compare
-  equal per UCA), CJK implicit weights, Hangul, and cross-script
-  ordering.  All match ICU.
+- **Collation**: 53 test cases.  33 compare directly against ICU
+  across primary (base character), secondary (accent), and tertiary
+  (case) weight levels — all match ICU.  20 additional cases verify
+  sort key consistency, case-insensitive comparison, long-string
+  overflow, and malformed UTF-8 resilience.
 
 Tests are in `tests/test_nfc_icu.c` and `tests/test_collate_icu.c`.
 Build with ICU development headers to run them.
