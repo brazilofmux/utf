@@ -31,6 +31,8 @@
  * input and only need to hold the current character's CE sequence.
  */
 #define MAX_CHAR_CES 64
+#define MAX_CMP_CES 256
+#define MAX_SORTKEY_CES 4096
 
 /* --- UTF-8 helpers --- */
 
@@ -302,6 +304,79 @@ static void InitLatinCache(void)
     s_latin_ce_init = 1;
 }
 
+/* --- CE collection (bounded fast path) --- */
+
+static int CollectCEsBounded(const unsigned char *src, size_t nSrc,
+                             uint32_t *ces, int maxCEs, int *pOverflow)
+{
+    if (!s_latin_ce_init) InitLatinCache();
+
+    const unsigned char *p = src;
+    const unsigned char *pEnd = src + nSrc;
+    int nCEs = 0;
+
+    *pOverflow = 0;
+    while (p < pEnd) {
+        if (nCEs >= maxCEs) {
+            *pOverflow = 1;
+            break;
+        }
+
+        /* ASCII fast path: single table lookup, no DFA. */
+        if (*p < 0x80) {
+            uint32_t ce = s_latin_ce[*p];
+            if (0 != ce) {
+                ces[nCEs++] = ce;
+                p++;
+                continue;
+            }
+        }
+        /* Latin 2-byte fast path: U+0080..U+017F (lead bytes 0xC2..0xC5). */
+        else if ((unsigned)(*p - 0xC2) <= (0xC5 - 0xC2)
+                 && p + 1 < pEnd && (p[1] & 0xC0) == 0x80) {
+            uint32_t cp = (uint32_t)((*p & 0x1F) << 6) | (p[1] & 0x3F);
+            uint32_t ce = s_latin_ce[cp];
+            if (0 != ce) {
+                ces[nCEs++] = ce;
+                p += 2;
+                continue;
+            }
+        }
+        /* CJK Unified Ideographs fast path: U+4E00..U+9FFF. */
+        else if (*p >= 0xE4 && *p <= 0xE9
+                 && p + 2 < pEnd
+                 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) {
+            uint32_t cp = ((uint32_t)(*p & 0x0F) << 12)
+                        | ((uint32_t)(p[1] & 0x3F) << 6)
+                        | (uint32_t)(p[2] & 0x3F);
+            if (cp >= 0x4E00 && cp <= 0x9FFF) {
+                if (nCEs + 2 > maxCEs) {
+                    *pOverflow = 1;
+                    break;
+                }
+                ces[nCEs++] = ((uint32_t)(0xFB40 + (unsigned short)(cp >> 15)) << 16)
+                            | ((uint32_t)0x0020 << 5) | 0x0002;
+                ces[nCEs++] = (uint32_t)((cp & 0x7FFF) | 0x8000) << 16;
+                p += 3;
+                continue;
+            }
+        }
+
+        {
+            int nAdded = ExtractCEs(&p, pEnd, ces + nCEs, maxCEs - nCEs);
+            nCEs += nAdded;
+            if (p < pEnd && nAdded == maxCEs - (nCEs - nAdded)) {
+                const unsigned char *probe = p;
+                uint32_t tmp[MAX_CHAR_CES];
+                if (probe < pEnd && ExtractCEs(&probe, pEnd, tmp, MAX_CHAR_CES) > 0)
+                    *pOverflow = 1;
+            }
+            if (*pOverflow) break;
+        }
+    }
+    return nCEs;
+}
+
 typedef struct {
     const unsigned char *p;
     const unsigned char *pEnd;
@@ -361,6 +436,32 @@ static int CompareLevel(const unsigned char *a, size_t nA,
         if (wA < wB) return -1;
         if (wA > wB) return 1;
     }
+}
+
+static int CompareLevelBuffered(const uint32_t *cesA, int nCEsA,
+                                const uint32_t *cesB, int nCEsB,
+                                int level)
+{
+    int iA = 0, iB = 0;
+
+    for (;;) {
+        while (iA < nCEsA && 0 == CEWeightForLevel(cesA[iA], level)) iA++;
+        while (iB < nCEsB && 0 == CEWeightForLevel(cesB[iB], level)) iB++;
+        if (iA >= nCEsA || iB >= nCEsB) break;
+
+        unsigned int wA = CEWeightForLevel(cesA[iA], level);
+        unsigned int wB = CEWeightForLevel(cesB[iB], level);
+        if (wA < wB) return -1;
+        if (wA > wB) return 1;
+        iA++;
+        iB++;
+    }
+
+    while (iA < nCEsA && 0 == CEWeightForLevel(cesA[iA], level)) iA++;
+    while (iB < nCEsB && 0 == CEWeightForLevel(cesB[iB], level)) iB++;
+    if (iA < nCEsA) return 1;
+    if (iB < nCEsB) return -1;
+    return 0;
 }
 
 static size_t GetNFCBytes(const unsigned char *src, size_t nSrc,
@@ -529,6 +630,23 @@ int utf_collate_cmp(const unsigned char *a, size_t nA,
     if (FastLatinCmp(a, nA, b, nB, &fastResult))
         return fastResult;
 
+    {
+        uint32_t cesA[MAX_CMP_CES], cesB[MAX_CMP_CES];
+        int overflowA, overflowB;
+        int nCEsA = CollectCEsBounded(a, nA, cesA, MAX_CMP_CES, &overflowA);
+        int nCEsB = CollectCEsBounded(b, nB, cesB, MAX_CMP_CES, &overflowB);
+
+        if (!overflowA && !overflowB) {
+            int cmp = CompareLevelBuffered(cesA, nCEsA, cesB, nCEsB, 1);
+            if (0 != cmp) return cmp;
+            cmp = CompareLevelBuffered(cesA, nCEsA, cesB, nCEsB, 2);
+            if (0 != cmp) return cmp;
+            cmp = CompareLevelBuffered(cesA, nCEsA, cesB, nCEsB, 3);
+            if (0 != cmp) return cmp;
+            return CompareNFCTiebreak(a, nA, b, nB);
+        }
+    }
+
     int cmp = CompareLevel(a, nA, b, nB, 1);
     if (0 != cmp) return cmp;
     cmp = CompareLevel(a, nA, b, nB, 2);
@@ -551,6 +669,19 @@ int utf_collate_cmp(const unsigned char *a, size_t nA,
 int utf_collate_cmp_ci(const unsigned char *a, size_t nA,
                        const unsigned char *b, size_t nB)
 {
+    {
+        uint32_t cesA[MAX_CMP_CES], cesB[MAX_CMP_CES];
+        int overflowA, overflowB;
+        int nCEsA = CollectCEsBounded(a, nA, cesA, MAX_CMP_CES, &overflowA);
+        int nCEsB = CollectCEsBounded(b, nB, cesB, MAX_CMP_CES, &overflowB);
+
+        if (!overflowA && !overflowB) {
+            int cmp = CompareLevelBuffered(cesA, nCEsA, cesB, nCEsB, 1);
+            if (0 != cmp) return cmp;
+            return CompareLevelBuffered(cesA, nCEsA, cesB, nCEsB, 2);
+        }
+    }
+
     int cmp = CompareLevel(a, nA, b, nB, 1);
     if (0 != cmp) return cmp;
     return CompareLevel(a, nA, b, nB, 2);
@@ -559,7 +690,29 @@ int utf_collate_cmp_ci(const unsigned char *a, size_t nA,
 size_t utf_collate_sortkey(const unsigned char *src, size_t nSrc,
                            unsigned char *key, size_t nKeyMax)
 {
+    uint32_t ces[MAX_SORTKEY_CES];
     size_t pos = 0;
+    int overflow;
+    int nCEs = CollectCEsBounded(src, nSrc, ces, MAX_SORTKEY_CES, &overflow);
+
+    if (!overflow) {
+        for (int i = 0; i < nCEs; i++) {
+            unsigned short p = CE_PRIMARY(ces[i]);
+            if (0 != p) AppendBE16(key, nKeyMax, &pos, p);
+        }
+        AppendBE16(key, nKeyMax, &pos, 0);
+        for (int i = 0; i < nCEs; i++) {
+            unsigned short s = CE_SECONDARY(ces[i]);
+            if (0 != s) AppendBE16(key, nKeyMax, &pos, s);
+        }
+        AppendBE16(key, nKeyMax, &pos, 0);
+        for (int i = 0; i < nCEs; i++) {
+            unsigned char t = CE_TERTIARY(ces[i]);
+            if (0 != t) AppendByte(key, nKeyMax, &pos, t);
+        }
+        AppendNFCTiebreak(src, nSrc, key, nKeyMax, &pos);
+        return (pos < nKeyMax) ? pos : nKeyMax;
+    }
 
     AppendLevelSortKey(src, nSrc, key, nKeyMax, &pos, 1);
     AppendBE16(key, nKeyMax, &pos, 0);
@@ -573,7 +726,23 @@ size_t utf_collate_sortkey(const unsigned char *src, size_t nSrc,
 size_t utf_collate_sortkey_ci(const unsigned char *src, size_t nSrc,
                               unsigned char *key, size_t nKeyMax)
 {
+    uint32_t ces[MAX_SORTKEY_CES];
     size_t pos = 0;
+    int overflow;
+    int nCEs = CollectCEsBounded(src, nSrc, ces, MAX_SORTKEY_CES, &overflow);
+
+    if (!overflow) {
+        for (int i = 0; i < nCEs; i++) {
+            unsigned short p = CE_PRIMARY(ces[i]);
+            if (0 != p) AppendBE16(key, nKeyMax, &pos, p);
+        }
+        AppendBE16(key, nKeyMax, &pos, 0);
+        for (int i = 0; i < nCEs; i++) {
+            unsigned short s = CE_SECONDARY(ces[i]);
+            if (0 != s) AppendBE16(key, nKeyMax, &pos, s);
+        }
+        return (pos < nKeyMax) ? pos : nKeyMax;
+    }
 
     AppendLevelSortKey(src, nSrc, key, nKeyMax, &pos, 1);
     AppendBE16(key, nKeyMax, &pos, 0);
