@@ -929,6 +929,48 @@ static void test_splice(void) {
               (const unsigned char *)"a y c", 5);
 }
 
+/* ---- co_splice color-insensitive ---- */
+
+static void test_splice_color(void) {
+    const char *name = "co_splice_color";
+    unsigned char out[UTF_BUFSIZE];
+    size_t r;
+
+    /* Color-insensitive: colored word DOES match plain search word
+     * because co_splice strips color before comparing. */
+    {
+        /* U+F600 (fg color 0) = 0xEF 0x98 0x80 */
+        unsigned char colored_list[8];
+        int n = pua_fg(colored_list, 0);
+        colored_list[n++] = 'b';
+        colored_list[n] = '\0';
+        r = co_splice(out,
+            colored_list, (size_t)n,
+            (const unsigned char *)"y", 1,
+            (const unsigned char *)"b", 1,
+            ' ', ' ');
+        /* Colored "b" strips to "b", matches search "b" → replaced with "y". */
+        check_buf(name, "color-insensitive match", out, r,
+                  (const unsigned char *)"y", 1);
+    }
+
+    /* Colored search word also stripped: plain "b" matched by colored search. */
+    {
+        unsigned char colored_search[8];
+        int n = pua_fg(colored_search, 1);
+        colored_search[n++] = 'b';
+        colored_search[n] = '\0';
+        r = co_splice(out,
+            (const unsigned char *)"b", 1,
+            (const unsigned char *)"y", 1,
+            colored_search, (size_t)n,
+            ' ', ' ');
+        /* Both strip to "b" → match → replaced. */
+        check_buf(name, "colored search matches plain word", out, r,
+                  (const unsigned char *)"y", 1);
+    }
+}
+
 /* ---- co_insert_word ---- */
 
 static void test_insert_word(void) {
@@ -3552,6 +3594,7 @@ static const test_suite_t suites[] = {
     { "member",           test_member },
     { "lpos",             test_lpos },
     { "splice",           test_splice },
+    { "splice_color",     test_splice_color },
     { "insert_word",      test_insert_word },
     { "visual_width",     test_visual_width },
     { "justify",          test_justify },
