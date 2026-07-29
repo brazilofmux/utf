@@ -84,10 +84,10 @@ extern UTF_API const unsigned short tr_widths_sbt[5707];
 /* ---- Grapheme Cluster Break DFA ---- */
 
 #define TR_GCB_START_STATE (0)
-#define TR_GCB_ACCEPTING_STATES_START (208)
+#define TR_GCB_ACCEPTING_STATES_START (207)
 extern UTF_API const unsigned char  tr_gcb_itt[256];
-extern UTF_API const unsigned short tr_gcb_sot[208];
-extern UTF_API const unsigned char  tr_gcb_sbt[2922];
+extern UTF_API const unsigned short tr_gcb_sot[207];
+extern UTF_API const unsigned char  tr_gcb_sbt[2914];
 
 /* ---- Extended Pictographic classification DFA ---- */
 

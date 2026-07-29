@@ -94,7 +94,8 @@ static uint32_t utf8_decode_c(const unsigned char *p, const unsigned char *pEnd)
 static int GetDUCET(const unsigned char *p, const unsigned char *pEnd)
 {
     int iState = TR_DUCET_START_STATE;
-    while (p < pEnd) {
+    /* Stop at the first accepting state (see run_dfa in grapheme.c). */
+    while (p < pEnd && iState < TR_DUCET_ACCEPTING_STATES_START) {
         unsigned char ch = *p++;
         int iColumn = tr_ducet_itt[ch];
         int iOffset = tr_ducet_sot[iState];
