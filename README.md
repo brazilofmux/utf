@@ -2,7 +2,7 @@
 
 A grab-and-go Unicode library built on compressed DFAs and Ragel -G2
 state machines.  Processes UTF-8 directly — no conversion to UTF-16
-and back.  No malloc.  No dependencies.  592 KB.
+and back.  No malloc.  No dependencies.  689 KB.
 
 Unicode 16.0.  MIT licensed.
 
@@ -66,9 +66,9 @@ general-purpose rule-based break engine.
 
 | | Size |
 |---|---|
-| **libutf.a** (stripped) | **592 KB** |
+| **libutf.a** (stripped) | **689 KB** |
 | libicuuc.a + libicui18n.a + libicudata.a | 42,326 KB |
-| **Ratio** | **71x smaller** |
+| **Ratio** | **61x smaller** |
 
 ## Correctness
 
