@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 make              # build libutf.a
-make test         # build and run all 347 tests
+make test         # build and run all 416 tests
 make examples     # build example programs in examples/
 make ragel        # regenerate src/color_ops.c from src/color_ops.rl (requires Ragel)
 make clean        # remove all build artifacts
@@ -39,4 +39,4 @@ Colors are encoded as Unicode Private Use Area codepoints inline in UTF-8 string
 
 - `src/color_ops.o` is compiled with `-Wno-implicit-fallthrough -Wno-unused-const-variable` because Ragel -G2 generates intentional fallthroughs.
 - The library links with `-lm` (math library, needed by CIE97 color distance).
-- There is one test file (`tests/test_color_ops.c`) containing all 347 tests with built-in fuzz testing.
+- There is one test file (`tests/test_color_ops.c`) containing all 416 tests with built-in fuzz testing.

@@ -12,3 +12,5 @@ bench/bench_nfc_quickcheck
 bench/bench_collate
 bench/bench_toupper
 bench/bench_grapheme
+*.dSYM/
+bench/bench_collate_libutf

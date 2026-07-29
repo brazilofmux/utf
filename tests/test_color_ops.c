@@ -3819,6 +3819,265 @@ static void test_render_html(void) {
     g_seed = save_seed;
 }
 
+/* ---- co_cluster_width ---- */
+
+static void test_cluster_width(void) {
+    const char *name = "cluster_width";
+
+    /* Simple ASCII. */
+    check_size(name, "'a'", co_cluster_width((const unsigned char *)"abc", 3), 1);
+
+    /* CJK fullwidth. */
+    const unsigned char sekai[] = { 0xE4, 0xB8, 0x96 };  /* 世 */
+    check_size(name, "CJK", co_cluster_width(sekai, 3), 2);
+
+    /* Combining mark cluster: e + U+0301 is one 1-column glyph. */
+    const unsigned char e_acute[] = { 0x65, 0xCC, 0x81 };
+    check_size(name, "e+combining", co_cluster_width(e_acute, 3), 1);
+
+    /* Regional Indicator pair: US flag renders as one 2-column glyph. */
+    const unsigned char flag[] = {
+        0xF0, 0x9F, 0x87, 0xBA,   /* U+1F1FA RI U */
+        0xF0, 0x9F, 0x87, 0xB8    /* U+1F1F8 RI S */
+    };
+    check_size(name, "RI flag pair", co_cluster_width(flag, 8), 2);
+
+    /* U+FE0F promotes a single-cell base to emoji presentation (2 cols). */
+    const unsigned char heart[] = { 0xE2, 0x9D, 0xA4, 0xEF, 0xB8, 0x8F };
+    check_size(name, "heart+VS16", co_cluster_width(heart, 6), 2);
+
+    /* ZWJ family sequence is one glyph, width 2 (max, not sum). */
+    const unsigned char family[] = {
+        0xF0, 0x9F, 0x91, 0xA8,   /* U+1F468 man */
+        0xE2, 0x80, 0x8D,         /* ZWJ */
+        0xF0, 0x9F, 0x91, 0xA9    /* U+1F469 woman */
+    };
+    check_size(name, "ZWJ pair", co_cluster_width(family, 11), 2);
+
+    /* Skin-tone modifier folds into the base. */
+    const unsigned char thumbs[] = {
+        0xF0, 0x9F, 0x91, 0x8D,   /* U+1F44D thumbs up */
+        0xF0, 0x9F, 0x8F, 0xBD    /* U+1F3FD modifier */
+    };
+    check_size(name, "thumbs+skin tone", co_cluster_width(thumbs, 8), 2);
+
+    /* Color codes before the cluster are transparent. */
+    unsigned char buf[32];
+    size_t n = (size_t)pua_fg(buf, 1);
+    memcpy(buf + n, sekai, 3); n += 3;
+    check_size(name, "color prefix", co_cluster_width(buf, n), 2);
+
+    /* Only color / empty. */
+    n = (size_t)pua_fg(buf, 1);
+    check_size(name, "only color", co_cluster_width(buf, n), 0);
+    check_size(name, "empty", co_cluster_width((const unsigned char *)"", 0), 0);
+}
+
+/* ---- co_copy_field ---- */
+
+static void test_copy_field(void) {
+    const char *name = "copy_field";
+    unsigned char out[UTF_BUFSIZE];
+    co_field f;
+
+    /* Column limit on plain ASCII. */
+    f = co_copy_field(out, sizeof(out),
+                      (const unsigned char *)"abcdef",
+                      (const unsigned char *)"abcdef" + 6, 3);
+    check_size(name, "ASCII 3 cols bytes", f.bytes, 3);
+    check_size(name, "ASCII 3 cols columns", f.columns, 3);
+    check_buf(name, "ASCII 3 cols content", out, f.bytes,
+              (const unsigned char *)"abc", 3);
+
+    /* Hard byte limit: nOutMax includes the NUL. */
+    f = co_copy_field(out, 4,
+                      (const unsigned char *)"abcdef",
+                      (const unsigned char *)"abcdef" + 6, 100);
+    check_size(name, "byte cap bytes", f.bytes, 3);
+    check_size(name, "byte cap columns", f.columns, 3);
+    check_size(name, "byte cap NUL", (size_t)out[3], 0);
+
+    /* pe = NULL means p + strlen(p). */
+    f = co_copy_field(out, sizeof(out),
+                      (const unsigned char *)"hello", NULL, 100);
+    check_size(name, "pe NULL bytes", f.bytes, 5);
+    check_size(name, "pe NULL columns", f.columns, 5);
+
+    /* Cluster-safe cut: cluster that cannot fit is not split. */
+    const unsigned char e_acute[] = { 0x65, 0xCC, 0x81 };
+    f = co_copy_field(out, 3, e_acute, e_acute + 3, 100);  /* 2 usable */
+    check_size(name, "cluster too big bytes", f.bytes, 0);
+    f = co_copy_field(out, 4, e_acute, e_acute + 3, 100);  /* 3 usable */
+    check_size(name, "cluster fits bytes", f.bytes, 3);
+    check_size(name, "cluster fits columns", f.columns, 1);
+
+    /* RI flag: 2 columns, indivisible. */
+    const unsigned char flag[] = {
+        0xF0, 0x9F, 0x87, 0xBA, 0xF0, 0x9F, 0x87, 0xB8
+    };
+    f = co_copy_field(out, sizeof(out), flag, flag + 8, 1);
+    check_size(name, "flag 1 col bytes", f.bytes, 0);
+    f = co_copy_field(out, sizeof(out), flag, flag + 8, 2);
+    check_size(name, "flag 2 cols bytes", f.bytes, 8);
+    check_size(name, "flag 2 cols columns", f.columns, 2);
+
+    /* Color close on truncate: fg(1) + "abcd" cut at 2 columns must end
+     * with a RESET so the cut does not bleed color. */
+    unsigned char src[32];
+    size_t n = (size_t)pua_fg(src, 1);
+    memcpy(src + n, "abcd", 4); n += 4;
+    f = co_copy_field(out, sizeof(out), src, src + n, 2);
+    unsigned char expect[16];
+    size_t en = (size_t)pua_fg(expect, 1);
+    memcpy(expect + en, "ab", 2); en += 2;
+    en += (size_t)pua_reset(expect + en);
+    check_buf(name, "color close on cut", out, f.bytes, expect, en);
+    check_size(name, "color close columns", f.columns, 2);
+
+    /* Reserve rule: color that cannot also close is not emitted.
+     * usable=3 fits fg(3) but not fg+reset(6) -> nothing written. */
+    f = co_copy_field(out, 4, src, src + n, 100);
+    check_size(name, "no room for close", f.bytes, 0);
+
+    /* Degenerate inputs. */
+    f = co_copy_field(out, sizeof(out), NULL, NULL, 5);
+    check_size(name, "NULL src", f.bytes, 0);
+    f = co_copy_field(out, sizeof(out),
+                      (const unsigned char *)"abc",
+                      (const unsigned char *)"abc" + 3, 0);
+    check_size(name, "0 cols", f.bytes, 0);
+
+    /* co_copy_columns agrees with co_copy_field at UTF_BUFSIZE. */
+    size_t r = co_copy_columns(out, src, src + n, 2);
+    check_size(name, "copy_columns wrapper", r, en);
+}
+
+/* ---- co_delete_at ---- */
+
+static void test_delete_at(void) {
+    const char *name = "delete_at";
+    unsigned char out[UTF_BUFSIZE];
+    size_t r;
+    int pos[8];
+
+    /* Delete middle word. */
+    pos[0] = 2;
+    r = co_delete_at(out, (const unsigned char *)"a b c d", 7, pos, 1, ' ', ' ');
+    check_buf(name, "delete 2", out, r, (const unsigned char *)"a c d", 5);
+
+    /* Negative wraps from end: -1 is the last word. */
+    pos[0] = -1;
+    r = co_delete_at(out, (const unsigned char *)"a b c d", 7, pos, 1, ' ', ' ');
+    check_buf(name, "delete -1", out, r, (const unsigned char *)"a b c", 5);
+
+    /* Duplicate positions collapse. */
+    pos[0] = 2; pos[1] = 2;
+    r = co_delete_at(out, (const unsigned char *)"a b c d", 7, pos, 2, ' ', ' ');
+    check_buf(name, "delete 2 2", out, r, (const unsigned char *)"a c d", 5);
+
+    /* Out-of-range ignored. */
+    pos[0] = 99;
+    r = co_delete_at(out, (const unsigned char *)"a b c d", 7, pos, 1, ' ', ' ');
+    check_buf(name, "delete 99 (no-op)", out, r, (const unsigned char *)"a b c d", 7);
+
+    /* Multiple positions. */
+    pos[0] = 1; pos[1] = 3;
+    r = co_delete_at(out, (const unsigned char *)"a b c d", 7, pos, 2, ' ', ' ');
+    check_buf(name, "delete 1 3", out, r, (const unsigned char *)"b d", 3);
+
+    /* Non-space delimiter: empty words are real words. */
+    pos[0] = 2;
+    r = co_delete_at(out, (const unsigned char *)"a||b", 4, pos, 1, '|', '|');
+    check_buf(name, "a||b delete 2", out, r, (const unsigned char *)"a|b", 3);
+
+    /* Color prefix stays attached to its word. */
+    unsigned char buf[64];
+    size_t n = (size_t)pua_fg(buf, 1);
+    memcpy(buf + n, "ab cd", 5); n += 5;
+    pos[0] = 99;
+    r = co_delete_at(out, buf, n, pos, 1, ' ', ' ');
+    check_buf(name, "no-op keeps color", out, r, buf, n);
+
+    /* Empty list. */
+    pos[0] = 1;
+    r = co_delete_at(out, (const unsigned char *)"", 0, pos, 1, ' ', ' ');
+    check_size(name, "empty list", r, 0);
+}
+
+/* ---- GCB table / reader regression ---- */
+
+static void test_gcb_regression(void) {
+    const char *name = "gcb_regression";
+
+    /* U+4026/U+4027 were misclassified (as Extend/Control) by the stale
+     * 208-state tr_gcb table combined with a reader that did not stop at
+     * the first accepting state — merging adjacent CJK into one cluster. */
+    const unsigned char two[] = { 0xE4, 0x80, 0xA6, 0xE4, 0x80, 0xA7 };
+    check_size(name, "U+4026 U+4027 clusters", co_cluster_count(two, 6), 2);
+    check_size(name, "U+4026 U+4027 width", co_visual_width(two, 6), 4);
+
+    /* 漢字 sanity. */
+    const unsigned char kanji[] = { 0xE6, 0xBC, 0xA2, 0xE5, 0xAD, 0x97 };
+    check_size(name, "kanji clusters", co_cluster_count(kanji, 6), 2);
+
+    /* U+E0E36 sat in the 458 code points the corrupted table input dropped
+     * entirely (should be GCB Control per Unicode 16 tags block extension —
+     * here we only require it not to glue neighbors together). */
+    const unsigned char tagged[] = {
+        'a', 0xF3, 0xA0, 0xB8, 0xB6, 'b'   /* a U+E0E36 b */
+    };
+    size_t nc = co_cluster_count(tagged, 6);
+    if (nc < 2) {
+        test_fail(name, "U+E0E36 glued neighbors (clusters=%zu)", nc);
+    } else {
+        test_ok(name, "U+E0E36 does not glue neighbors (clusters=%zu)", nc);
+    }
+}
+
+/* ---- MUX list parity (member/pos/empty words) ---- */
+
+static void test_list_parity(void) {
+    const char *name = "list_parity";
+    unsigned char out[UTF_BUFSIZE];
+
+    /* member with a non-space delimiter counts empty words:
+     * member(a||b, "", |) == 2. */
+    check_size(name, "member empty word",
+               co_member((const unsigned char *)"", 0,
+                         (const unsigned char *)"a||b", 4, '|'), 2);
+
+    /* split_token always yields one (possibly empty) word. */
+    check_size(name, "member of empty list",
+               co_member((const unsigned char *)"", 0,
+                         (const unsigned char *)"", 0, '|'), 1);
+
+    /* Space delimiter trims and compresses. */
+    check_size(name, "member space trim",
+               co_member((const unsigned char *)"b", 1,
+                         (const unsigned char *)"  a  b  ", 8, ' '), 2);
+
+    /* co_pos counts grapheme clusters, not code points: a skin-tone emoji
+     * before the match is ONE position. */
+    unsigned char hay[32];
+    size_t n = 0;
+    const unsigned char thumbs[] = {
+        0xF0, 0x9F, 0x91, 0x8D, 0xF0, 0x9F, 0x8F, 0xBD
+    };
+    memcpy(hay + n, thumbs, 8); n += 8;
+    hay[n++] = 'x';
+    check_size(name, "pos after emoji cluster",
+               co_pos(hay, n, (const unsigned char *)"x", 1), 2);
+
+    /* ldelete-style no-op keeps a leading color prefix (via replace path):
+     * deleting an out-of-range word from a colored list is byte-identical. */
+    unsigned char buf[64];
+    size_t bn = (size_t)pua_fg(buf, 2);
+    memcpy(buf + bn, "ab cd", 5); bn += 5;
+    int pos1[1] = { 99 };
+    size_t r = co_delete_at(out, buf, bn, pos1, 1, ' ', ' ');
+    check_buf(name, "colored no-op ldelete", out, r, buf, bn);
+}
+
 /* ================================================================
  * Main
  * ================================================================ */
@@ -3874,6 +4133,11 @@ static const test_suite_t suites[] = {
     { "lbuf_overflow",    test_lbuf_overflow },
     { "navigation",       test_navigation },
     { "copy_columns",     test_copy_columns },
+    { "cluster_width",    test_cluster_width },
+    { "copy_field",       test_copy_field },
+    { "delete_at",        test_delete_at },
+    { "gcb_regression",   test_gcb_regression },
+    { "list_parity",      test_list_parity },
     { "split_words",      test_split_words },
     { "trim_pattern",     test_trim_pattern },
     { "compress_str",     test_compress_str },
