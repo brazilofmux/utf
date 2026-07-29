@@ -24,6 +24,7 @@
 #include "utf/utf_tables.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 
 /* ---- Grapheme Cluster Break (GCB) DFA tables from utf8tables ----
@@ -234,19 +235,19 @@ static inline size_t wp_safe_copy(unsigned char *wp, const unsigned char *wp_end
 /* ---------- Ragel machine definitions ---------- */
 
 
-#line 282 "src/color_ops.rl"
+#line 283 "src/color_ops.rl"
 
 
 /* ---- co_visible_length ---- */
 
 
-#line 244 "src/color_ops.c"
+#line 245 "src/color_ops.c"
 static const int visible_length_start = 12;
 
 static const int visible_length_en_main = 12;
 
 
-#line 295 "src/color_ops.rl"
+#line 296 "src/color_ops.rl"
 
 
 size_t co_visible_length(const unsigned char *data, size_t len)
@@ -257,28 +258,28 @@ size_t co_visible_length(const unsigned char *data, size_t len)
     size_t nVisible = 0;
 
     
-#line 261 "src/color_ops.c"
+#line 262 "src/color_ops.c"
 	{
 	cs = visible_length_start;
 	}
 
-#line 305 "src/color_ops.rl"
+#line 306 "src/color_ops.rl"
     
-#line 268 "src/color_ops.c"
+#line 269 "src/color_ops.c"
 	{
 	if ( p == pe )
 		goto _test_eof;
 	switch ( cs )
 	{
 tr0:
-#line 290 "src/color_ops.rl"
+#line 291 "src/color_ops.rl"
 	{ nVisible++; }
 	goto st12;
 st12:
 	if ( ++p == pe )
 		goto _test_eof12;
 case 12:
-#line 282 "src/color_ops.c"
+#line 283 "src/color_ops.c"
 	switch( (*p) ) {
 		case 0u: goto st0;
 		case 224u: goto st2;
@@ -413,7 +414,7 @@ case 11:
 	_out: {}
 	}
 
-#line 306 "src/color_ops.rl"
+#line 307 "src/color_ops.rl"
 
     return nVisible;
 }
@@ -444,13 +445,13 @@ const unsigned char *co_skip_color(const unsigned char *p,
 /* ---- co_visible_advance ---- */
 
 
-#line 448 "src/color_ops.c"
+#line 449 "src/color_ops.c"
 static const int visible_advance_start = 12;
 
 static const int visible_advance_en_main = 12;
 
 
-#line 352 "src/color_ops.rl"
+#line 353 "src/color_ops.rl"
 
 
 const unsigned char *co_visible_advance(const unsigned char *data,
@@ -468,21 +469,21 @@ const unsigned char *co_visible_advance(const unsigned char *data,
     }
 
     
-#line 472 "src/color_ops.c"
+#line 473 "src/color_ops.c"
 	{
 	cs = visible_advance_start;
 	}
 
-#line 369 "src/color_ops.rl"
+#line 370 "src/color_ops.rl"
     
-#line 479 "src/color_ops.c"
+#line 480 "src/color_ops.c"
 	{
 	if ( p == pe )
 		goto _test_eof;
 	switch ( cs )
 	{
 tr0:
-#line 339 "src/color_ops.rl"
+#line 340 "src/color_ops.rl"
 	{
         nSeen++;
         if (nSeen >= n) {
@@ -497,7 +498,7 @@ st12:
 	if ( ++p == pe )
 		goto _test_eof12;
 case 12:
-#line 501 "src/color_ops.c"
+#line 502 "src/color_ops.c"
 	switch( (*p) ) {
 		case 0u: goto st0;
 		case 224u: goto st2;
@@ -632,7 +633,7 @@ case 11:
 	_out: {}
 	}
 
-#line 370 "src/color_ops.rl"
+#line 371 "src/color_ops.rl"
 
     if (out_count) *out_count = nSeen;
     return p;
@@ -641,13 +642,13 @@ case 11:
 /* ---- co_copy_visible ---- */
 
 
-#line 645 "src/color_ops.c"
+#line 646 "src/color_ops.c"
 static const int copy_visible_start = 12;
 
 static const int copy_visible_en_main = 12;
 
 
-#line 398 "src/color_ops.rl"
+#line 399 "src/color_ops.rl"
 
 
 size_t co_copy_visible(unsigned char *out, const unsigned char *data,
@@ -663,21 +664,21 @@ size_t co_copy_visible(unsigned char *out, const unsigned char *data,
     size_t nCopied = 0;
 
     
-#line 667 "src/color_ops.c"
+#line 668 "src/color_ops.c"
 	{
 	cs = copy_visible_start;
 	}
 
-#line 413 "src/color_ops.rl"
+#line 414 "src/color_ops.rl"
     
-#line 674 "src/color_ops.c"
+#line 675 "src/color_ops.c"
 	{
 	if ( p == pe )
 		goto _test_eof;
 	switch ( cs )
 	{
 tr4:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -686,7 +687,7 @@ st12:
 	if ( ++p == pe )
 		goto _test_eof12;
 case 12:
-#line 690 "src/color_ops.c"
+#line 691 "src/color_ops.c"
 	switch( (*p) ) {
 		case 0u: goto st0;
 		case 224u: goto tr7;
@@ -715,20 +716,20 @@ st0:
 cs = 0;
 	goto _out;
 tr0:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
 	goto st13;
 tr14:
-#line 385 "src/color_ops.rl"
+#line 386 "src/color_ops.rl"
 	{
         nCopied++;
         if (nCopied >= limit || wp >= wp_end) {
             {p++; cs = 13; goto _out;}
         }
     }
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -737,7 +738,7 @@ st13:
 	if ( ++p == pe )
 		goto _test_eof13;
 case 13:
-#line 741 "src/color_ops.c"
+#line 742 "src/color_ops.c"
 	switch( (*p) ) {
 		case 0u: goto st0;
 		case 224u: goto tr16;
@@ -763,20 +764,20 @@ case 13:
 		goto tr17;
 	goto tr14;
 tr2:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
 	goto st1;
 tr15:
-#line 385 "src/color_ops.rl"
+#line 386 "src/color_ops.rl"
 	{
         nCopied++;
         if (nCopied >= limit || wp >= wp_end) {
             {p++; cs = 1; goto _out;}
         }
     }
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -785,25 +786,25 @@ st1:
 	if ( ++p == pe )
 		goto _test_eof1;
 case 1:
-#line 789 "src/color_ops.c"
+#line 790 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto tr0;
 	goto st0;
 tr7:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
 	goto st2;
 tr16:
-#line 385 "src/color_ops.rl"
+#line 386 "src/color_ops.rl"
 	{
         nCopied++;
         if (nCopied >= limit || wp >= wp_end) {
             {p++; cs = 2; goto _out;}
         }
     }
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -812,25 +813,25 @@ st2:
 	if ( ++p == pe )
 		goto _test_eof2;
 case 2:
-#line 816 "src/color_ops.c"
+#line 817 "src/color_ops.c"
 	if ( 160u <= (*p) && (*p) <= 191u )
 		goto tr2;
 	goto st0;
 tr5:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
 	goto st3;
 tr17:
-#line 385 "src/color_ops.rl"
+#line 386 "src/color_ops.rl"
 	{
         nCopied++;
         if (nCopied >= limit || wp >= wp_end) {
             {p++; cs = 3; goto _out;}
         }
     }
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -839,25 +840,25 @@ st3:
 	if ( ++p == pe )
 		goto _test_eof3;
 case 3:
-#line 843 "src/color_ops.c"
+#line 844 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto tr2;
 	goto st0;
 tr8:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
 	goto st4;
 tr18:
-#line 385 "src/color_ops.rl"
+#line 386 "src/color_ops.rl"
 	{
         nCopied++;
         if (nCopied >= limit || wp >= wp_end) {
             {p++; cs = 4; goto _out;}
         }
     }
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -866,25 +867,25 @@ st4:
 	if ( ++p == pe )
 		goto _test_eof4;
 case 4:
-#line 870 "src/color_ops.c"
+#line 871 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 159u )
 		goto tr2;
 	goto st0;
 tr9:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
 	goto st5;
 tr19:
-#line 385 "src/color_ops.rl"
+#line 386 "src/color_ops.rl"
 	{
         nCopied++;
         if (nCopied >= limit || wp >= wp_end) {
             {p++; cs = 5; goto _out;}
         }
     }
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -893,7 +894,7 @@ st5:
 	if ( ++p == pe )
 		goto _test_eof5;
 case 5:
-#line 897 "src/color_ops.c"
+#line 898 "src/color_ops.c"
 	if ( (*p) < 148u ) {
 		if ( 128u <= (*p) && (*p) <= 147u )
 			goto tr2;
@@ -904,7 +905,7 @@ case 5:
 		goto tr3;
 	goto st0;
 tr3:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -913,25 +914,25 @@ st6:
 	if ( ++p == pe )
 		goto _test_eof6;
 case 6:
-#line 917 "src/color_ops.c"
+#line 918 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto tr4;
 	goto st0;
 tr10:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
 	goto st7;
 tr20:
-#line 385 "src/color_ops.rl"
+#line 386 "src/color_ops.rl"
 	{
         nCopied++;
         if (nCopied >= limit || wp >= wp_end) {
             {p++; cs = 7; goto _out;}
         }
     }
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -940,25 +941,25 @@ st7:
 	if ( ++p == pe )
 		goto _test_eof7;
 case 7:
-#line 944 "src/color_ops.c"
+#line 945 "src/color_ops.c"
 	if ( 144u <= (*p) && (*p) <= 191u )
 		goto tr5;
 	goto st0;
 tr11:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
 	goto st8;
 tr21:
-#line 385 "src/color_ops.rl"
+#line 386 "src/color_ops.rl"
 	{
         nCopied++;
         if (nCopied >= limit || wp >= wp_end) {
             {p++; cs = 8; goto _out;}
         }
     }
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -967,25 +968,25 @@ st8:
 	if ( ++p == pe )
 		goto _test_eof8;
 case 8:
-#line 971 "src/color_ops.c"
+#line 972 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto tr5;
 	goto st0;
 tr12:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
 	goto st9;
 tr22:
-#line 385 "src/color_ops.rl"
+#line 386 "src/color_ops.rl"
 	{
         nCopied++;
         if (nCopied >= limit || wp >= wp_end) {
             {p++; cs = 9; goto _out;}
         }
     }
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -994,7 +995,7 @@ st9:
 	if ( ++p == pe )
 		goto _test_eof9;
 case 9:
-#line 998 "src/color_ops.c"
+#line 999 "src/color_ops.c"
 	if ( (*p) < 176u ) {
 		if ( 128u <= (*p) && (*p) <= 175u )
 			goto tr5;
@@ -1005,7 +1006,7 @@ case 9:
 		goto tr6;
 	goto st0;
 tr6:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -1014,25 +1015,25 @@ st10:
 	if ( ++p == pe )
 		goto _test_eof10;
 case 10:
-#line 1018 "src/color_ops.c"
+#line 1019 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto tr3;
 	goto st0;
 tr13:
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
 	goto st11;
 tr23:
-#line 385 "src/color_ops.rl"
+#line 386 "src/color_ops.rl"
 	{
         nCopied++;
         if (nCopied >= limit || wp >= wp_end) {
             {p++; cs = 11; goto _out;}
         }
     }
-#line 381 "src/color_ops.rl"
+#line 382 "src/color_ops.rl"
 	{
         WP_SAFE(wp, wp_end, (*p));
     }
@@ -1041,7 +1042,7 @@ st11:
 	if ( ++p == pe )
 		goto _test_eof11;
 case 11:
-#line 1045 "src/color_ops.c"
+#line 1046 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 143u )
 		goto tr5;
 	goto st0;
@@ -1065,7 +1066,7 @@ case 11:
 	{
 	switch ( cs ) {
 	case 13: 
-#line 385 "src/color_ops.rl"
+#line 386 "src/color_ops.rl"
 	{
         nCopied++;
         if (nCopied >= limit || wp >= wp_end) {
@@ -1073,14 +1074,14 @@ case 11:
         }
     }
 	break;
-#line 1077 "src/color_ops.c"
+#line 1078 "src/color_ops.c"
 	}
 	}
 
 	_out: {}
 	}
 
-#line 414 "src/color_ops.rl"
+#line 415 "src/color_ops.rl"
 
     *wp = '\0';
     return (size_t)(wp - out);
@@ -1089,39 +1090,53 @@ case 11:
 /* ---- co_find_delim ---- */
 
 
-#line 1093 "src/color_ops.c"
+#line 1094 "src/color_ops.c"
 static const int find_delim_start = 12;
 
 static const int find_delim_en_main = 12;
 
 
-#line 435 "src/color_ops.rl"
+#line 436 "src/color_ops.rl"
 
 
 const unsigned char *co_find_delim(const unsigned char *data,
                                    const unsigned char *pe,
                                    unsigned char target)
 {
+    /* Fast path for ASCII delimiters (the overwhelmingly common case:
+     * space and other printable separators).  Internal color is stored as
+     * Private Use Area code points (BMP U+F500-F7FF, SMP U+F0000-F05FF) in
+     * UTF-8, so every color byte is >= 0x80; likewise every byte of a
+     * multi-byte UTF-8 character is >= 0x80.  A target in 0x01..0x7F can
+     * therefore never appear inside a color token or a multi-byte character,
+     * so the first matching byte is always a standalone visible delimiter --
+     * exactly what the color/UTF-8-aware DFA below returns.  memchr is a
+     * SIMD-optimized scan; the DFA walks one byte per state transition. */
+    if (0x01 <= target && target <= 0x7F) {
+        return (const unsigned char *)memchr(data, target,
+                                             (size_t)(pe - data));
+    }
+
     int cs;
     const unsigned char *p = data;
     const unsigned char *found = NULL;
 
     
-#line 1111 "src/color_ops.c"
+#line 1126 "src/color_ops.c"
 	{
 	cs = find_delim_start;
 	}
 
-#line 446 "src/color_ops.rl"
+#line 461 "src/color_ops.rl"
     
-#line 1118 "src/color_ops.c"
+#line 1133 "src/color_ops.c"
 	{
 	if ( p == pe )
 		goto _test_eof;
 	switch ( cs )
 	{
 tr0:
-#line 425 "src/color_ops.rl"
+#line 426 "src/color_ops.rl"
 	{
         if ((*p) == target) {
             found = p;  /* p points at the byte during action */
@@ -1133,7 +1148,7 @@ st12:
 	if ( ++p == pe )
 		goto _test_eof12;
 case 12:
-#line 1137 "src/color_ops.c"
+#line 1152 "src/color_ops.c"
 	switch( (*p) ) {
 		case 0u: goto st0;
 		case 224u: goto st2;
@@ -1268,7 +1283,7 @@ case 11:
 	_out: {}
 	}
 
-#line 447 "src/color_ops.rl"
+#line 462 "src/color_ops.rl"
 
     return found;
 }
@@ -1748,12 +1763,16 @@ size_t co_split_words(const unsigned char *data, size_t len,
     const unsigned char *p = data;
 
     if (is_space) {
-        /* Space-compress mode: skip leading spaces. */
+        /* Space-compress mode: skip leading spaces.  Color codes that
+         * precede the first visible character stay attached to the
+         * first word (do NOT advance p past them): consumers like
+         * do_itemfuns rebuild the list from these ranges, and skipping
+         * the color prefix silently dropped it -- a no-op
+         * ldelete(ansi(h,ab cd),99) lost the highlight. */
         while (p < pe) {
             const unsigned char *q = co_skip_color(p, pe);
             if (q >= pe) { p = pe; break; }
             if (*q == ' ') { p = q + 1; continue; }
-            p = q;
             break;
         }
 
@@ -1774,12 +1793,13 @@ size_t co_split_words(const unsigned char *data, size_t len,
             word_ends[nWords] = (size_t)(dp - data);
             nWords++;
 
-            /* Skip past consecutive spaces. */
+            /* Skip past consecutive spaces.  As above, color codes
+             * between the space run and the next visible character
+             * belong to the NEXT word's range. */
             while (dp < pe) {
                 const unsigned char *q = co_skip_color(dp, pe);
                 if (q >= pe) { dp = pe; break; }
                 if (*q == ' ') { dp = q + 1; continue; }
-                dp = q;
                 break;
             }
             p = dp;
@@ -1945,13 +1965,13 @@ size_t co_compress_str(unsigned char *out,
 /* ---- co_strip_color ---- */
 
 
-#line 1949 "src/color_ops.c"
+#line 1969 "src/color_ops.c"
 static const int strip_color_start = 12;
 
 static const int strip_color_en_main = 12;
 
 
-#line 1135 "src/color_ops.rl"
+#line 1155 "src/color_ops.rl"
 
 
 size_t co_strip_color(unsigned char *out, const unsigned char *data,
@@ -1965,30 +1985,30 @@ size_t co_strip_color(unsigned char *out, const unsigned char *data,
     const unsigned char *wp_end = out + UTF_BUFSIZE - 1;
 
     
-#line 1969 "src/color_ops.c"
+#line 1989 "src/color_ops.c"
 	{
 	cs = strip_color_start;
 	}
 
-#line 1148 "src/color_ops.rl"
+#line 1168 "src/color_ops.rl"
     
-#line 1976 "src/color_ops.c"
+#line 1996 "src/color_ops.c"
 	{
 	if ( p == pe )
 		goto _test_eof;
 	switch ( cs )
 	{
 tr0:
-#line 1127 "src/color_ops.rl"
+#line 1147 "src/color_ops.rl"
 	{
         const unsigned char *s = mark;
         while (s <= p) WP_SAFE(wp, wp_end, *s++);
     }
 	goto st12;
 tr7:
-#line 1126 "src/color_ops.rl"
+#line 1146 "src/color_ops.rl"
 	{ mark = p; }
-#line 1127 "src/color_ops.rl"
+#line 1147 "src/color_ops.rl"
 	{
         const unsigned char *s = mark;
         while (s <= p) WP_SAFE(wp, wp_end, *s++);
@@ -1998,7 +2018,7 @@ st12:
 	if ( ++p == pe )
 		goto _test_eof12;
 case 12:
-#line 2002 "src/color_ops.c"
+#line 2022 "src/color_ops.c"
 	switch( (*p) ) {
 		case 0u: goto st0;
 		case 224u: goto tr9;
@@ -2027,62 +2047,62 @@ st0:
 cs = 0;
 	goto _out;
 tr8:
-#line 1126 "src/color_ops.rl"
+#line 1146 "src/color_ops.rl"
 	{ mark = p; }
 	goto st1;
 st1:
 	if ( ++p == pe )
 		goto _test_eof1;
 case 1:
-#line 2038 "src/color_ops.c"
+#line 2058 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto tr0;
 	goto st0;
 tr9:
-#line 1126 "src/color_ops.rl"
+#line 1146 "src/color_ops.rl"
 	{ mark = p; }
 	goto st2;
 st2:
 	if ( ++p == pe )
 		goto _test_eof2;
 case 2:
-#line 2050 "src/color_ops.c"
+#line 2070 "src/color_ops.c"
 	if ( 160u <= (*p) && (*p) <= 191u )
 		goto st1;
 	goto st0;
 tr10:
-#line 1126 "src/color_ops.rl"
+#line 1146 "src/color_ops.rl"
 	{ mark = p; }
 	goto st3;
 st3:
 	if ( ++p == pe )
 		goto _test_eof3;
 case 3:
-#line 2062 "src/color_ops.c"
+#line 2082 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto st1;
 	goto st0;
 tr11:
-#line 1126 "src/color_ops.rl"
+#line 1146 "src/color_ops.rl"
 	{ mark = p; }
 	goto st4;
 st4:
 	if ( ++p == pe )
 		goto _test_eof4;
 case 4:
-#line 2074 "src/color_ops.c"
+#line 2094 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 159u )
 		goto st1;
 	goto st0;
 tr12:
-#line 1126 "src/color_ops.rl"
+#line 1146 "src/color_ops.rl"
 	{ mark = p; }
 	goto st5;
 st5:
 	if ( ++p == pe )
 		goto _test_eof5;
 case 5:
-#line 2086 "src/color_ops.c"
+#line 2106 "src/color_ops.c"
 	if ( (*p) < 148u ) {
 		if ( 128u <= (*p) && (*p) <= 147u )
 			goto st1;
@@ -2100,38 +2120,38 @@ case 6:
 		goto st12;
 	goto st0;
 tr13:
-#line 1126 "src/color_ops.rl"
+#line 1146 "src/color_ops.rl"
 	{ mark = p; }
 	goto st7;
 st7:
 	if ( ++p == pe )
 		goto _test_eof7;
 case 7:
-#line 2111 "src/color_ops.c"
+#line 2131 "src/color_ops.c"
 	if ( 144u <= (*p) && (*p) <= 191u )
 		goto st3;
 	goto st0;
 tr14:
-#line 1126 "src/color_ops.rl"
+#line 1146 "src/color_ops.rl"
 	{ mark = p; }
 	goto st8;
 st8:
 	if ( ++p == pe )
 		goto _test_eof8;
 case 8:
-#line 2123 "src/color_ops.c"
+#line 2143 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto st3;
 	goto st0;
 tr15:
-#line 1126 "src/color_ops.rl"
+#line 1146 "src/color_ops.rl"
 	{ mark = p; }
 	goto st9;
 st9:
 	if ( ++p == pe )
 		goto _test_eof9;
 case 9:
-#line 2135 "src/color_ops.c"
+#line 2155 "src/color_ops.c"
 	if ( (*p) < 176u ) {
 		if ( 128u <= (*p) && (*p) <= 175u )
 			goto st3;
@@ -2149,14 +2169,14 @@ case 10:
 		goto st6;
 	goto st0;
 tr16:
-#line 1126 "src/color_ops.rl"
+#line 1146 "src/color_ops.rl"
 	{ mark = p; }
 	goto st11;
 st11:
 	if ( ++p == pe )
 		goto _test_eof11;
 case 11:
-#line 2160 "src/color_ops.c"
+#line 2180 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 143u )
 		goto st3;
 	goto st0;
@@ -2178,7 +2198,7 @@ case 11:
 	_out: {}
 	}
 
-#line 1149 "src/color_ops.rl"
+#line 1169 "src/color_ops.rl"
 
     *wp = '\0';
     return (size_t)(wp - out);
@@ -2187,13 +2207,13 @@ case 11:
 /* ---- co_toupper (full Unicode via DFA tables) ---- */
 
 
-#line 2191 "src/color_ops.c"
+#line 2211 "src/color_ops.c"
 static const int toupper_machine_start = 12;
 
 static const int toupper_machine_en_main = 12;
 
 
-#line 1190 "src/color_ops.rl"
+#line 1210 "src/color_ops.rl"
 
 
 size_t co_toupper(unsigned char *out, const unsigned char *data, size_t len)
@@ -2206,21 +2226,21 @@ size_t co_toupper(unsigned char *out, const unsigned char *data, size_t len)
     const unsigned char *wp_end = out + UTF_BUFSIZE - 1;
 
     
-#line 2210 "src/color_ops.c"
+#line 2230 "src/color_ops.c"
 	{
 	cs = toupper_machine_start;
 	}
 
-#line 1202 "src/color_ops.rl"
+#line 1222 "src/color_ops.rl"
     
-#line 2217 "src/color_ops.c"
+#line 2237 "src/color_ops.c"
 	{
 	if ( p == pe )
 		goto _test_eof;
 	switch ( cs )
 	{
 tr0:
-#line 1165 "src/color_ops.rl"
+#line 1185 "src/color_ops.rl"
 	{
         size_t src = (size_t)(p - mark + 1);
         int bXor;
@@ -2244,16 +2264,16 @@ tr0:
     }
 	goto st12;
 tr4:
-#line 1161 "src/color_ops.rl"
+#line 1181 "src/color_ops.rl"
 	{
         const unsigned char *s = mark;
         while (s <= p) WP_SAFE(wp, wp_end, *s++);
     }
 	goto st12;
 tr7:
-#line 1160 "src/color_ops.rl"
+#line 1180 "src/color_ops.rl"
 	{ mark = p; }
-#line 1165 "src/color_ops.rl"
+#line 1185 "src/color_ops.rl"
 	{
         size_t src = (size_t)(p - mark + 1);
         int bXor;
@@ -2280,7 +2300,7 @@ st12:
 	if ( ++p == pe )
 		goto _test_eof12;
 case 12:
-#line 2284 "src/color_ops.c"
+#line 2304 "src/color_ops.c"
 	switch( (*p) ) {
 		case 0u: goto st0;
 		case 224u: goto tr9;
@@ -2309,62 +2329,62 @@ st0:
 cs = 0;
 	goto _out;
 tr8:
-#line 1160 "src/color_ops.rl"
+#line 1180 "src/color_ops.rl"
 	{ mark = p; }
 	goto st1;
 st1:
 	if ( ++p == pe )
 		goto _test_eof1;
 case 1:
-#line 2320 "src/color_ops.c"
+#line 2340 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto tr0;
 	goto st0;
 tr9:
-#line 1160 "src/color_ops.rl"
+#line 1180 "src/color_ops.rl"
 	{ mark = p; }
 	goto st2;
 st2:
 	if ( ++p == pe )
 		goto _test_eof2;
 case 2:
-#line 2332 "src/color_ops.c"
+#line 2352 "src/color_ops.c"
 	if ( 160u <= (*p) && (*p) <= 191u )
 		goto st1;
 	goto st0;
 tr10:
-#line 1160 "src/color_ops.rl"
+#line 1180 "src/color_ops.rl"
 	{ mark = p; }
 	goto st3;
 st3:
 	if ( ++p == pe )
 		goto _test_eof3;
 case 3:
-#line 2344 "src/color_ops.c"
+#line 2364 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto st1;
 	goto st0;
 tr11:
-#line 1160 "src/color_ops.rl"
+#line 1180 "src/color_ops.rl"
 	{ mark = p; }
 	goto st4;
 st4:
 	if ( ++p == pe )
 		goto _test_eof4;
 case 4:
-#line 2356 "src/color_ops.c"
+#line 2376 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 159u )
 		goto st1;
 	goto st0;
 tr12:
-#line 1160 "src/color_ops.rl"
+#line 1180 "src/color_ops.rl"
 	{ mark = p; }
 	goto st5;
 st5:
 	if ( ++p == pe )
 		goto _test_eof5;
 case 5:
-#line 2368 "src/color_ops.c"
+#line 2388 "src/color_ops.c"
 	if ( (*p) < 148u ) {
 		if ( 128u <= (*p) && (*p) <= 147u )
 			goto st1;
@@ -2382,38 +2402,38 @@ case 6:
 		goto tr4;
 	goto st0;
 tr13:
-#line 1160 "src/color_ops.rl"
+#line 1180 "src/color_ops.rl"
 	{ mark = p; }
 	goto st7;
 st7:
 	if ( ++p == pe )
 		goto _test_eof7;
 case 7:
-#line 2393 "src/color_ops.c"
+#line 2413 "src/color_ops.c"
 	if ( 144u <= (*p) && (*p) <= 191u )
 		goto st3;
 	goto st0;
 tr14:
-#line 1160 "src/color_ops.rl"
+#line 1180 "src/color_ops.rl"
 	{ mark = p; }
 	goto st8;
 st8:
 	if ( ++p == pe )
 		goto _test_eof8;
 case 8:
-#line 2405 "src/color_ops.c"
+#line 2425 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto st3;
 	goto st0;
 tr15:
-#line 1160 "src/color_ops.rl"
+#line 1180 "src/color_ops.rl"
 	{ mark = p; }
 	goto st9;
 st9:
 	if ( ++p == pe )
 		goto _test_eof9;
 case 9:
-#line 2417 "src/color_ops.c"
+#line 2437 "src/color_ops.c"
 	if ( (*p) < 176u ) {
 		if ( 128u <= (*p) && (*p) <= 175u )
 			goto st3;
@@ -2431,14 +2451,14 @@ case 10:
 		goto st6;
 	goto st0;
 tr16:
-#line 1160 "src/color_ops.rl"
+#line 1180 "src/color_ops.rl"
 	{ mark = p; }
 	goto st11;
 st11:
 	if ( ++p == pe )
 		goto _test_eof11;
 case 11:
-#line 2442 "src/color_ops.c"
+#line 2462 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 143u )
 		goto st3;
 	goto st0;
@@ -2460,7 +2480,7 @@ case 11:
 	_out: {}
 	}
 
-#line 1203 "src/color_ops.rl"
+#line 1223 "src/color_ops.rl"
 
     *wp = '\0';
     return (size_t)(wp - out);
@@ -2469,13 +2489,13 @@ case 11:
 /* ---- co_tolower (full Unicode via DFA tables) ---- */
 
 
-#line 2473 "src/color_ops.c"
+#line 2493 "src/color_ops.c"
 static const int tolower_machine_start = 12;
 
 static const int tolower_machine_en_main = 12;
 
 
-#line 1244 "src/color_ops.rl"
+#line 1264 "src/color_ops.rl"
 
 
 size_t co_tolower(unsigned char *out, const unsigned char *data, size_t len)
@@ -2488,21 +2508,21 @@ size_t co_tolower(unsigned char *out, const unsigned char *data, size_t len)
     const unsigned char *wp_end = out + UTF_BUFSIZE - 1;
 
     
-#line 2492 "src/color_ops.c"
+#line 2512 "src/color_ops.c"
 	{
 	cs = tolower_machine_start;
 	}
 
-#line 1256 "src/color_ops.rl"
+#line 1276 "src/color_ops.rl"
     
-#line 2499 "src/color_ops.c"
+#line 2519 "src/color_ops.c"
 	{
 	if ( p == pe )
 		goto _test_eof;
 	switch ( cs )
 	{
 tr0:
-#line 1219 "src/color_ops.rl"
+#line 1239 "src/color_ops.rl"
 	{
         size_t src = (size_t)(p - mark + 1);
         int bXor;
@@ -2526,16 +2546,16 @@ tr0:
     }
 	goto st12;
 tr4:
-#line 1215 "src/color_ops.rl"
+#line 1235 "src/color_ops.rl"
 	{
         const unsigned char *s = mark;
         while (s <= p) WP_SAFE(wp, wp_end, *s++);
     }
 	goto st12;
 tr7:
-#line 1214 "src/color_ops.rl"
+#line 1234 "src/color_ops.rl"
 	{ mark = p; }
-#line 1219 "src/color_ops.rl"
+#line 1239 "src/color_ops.rl"
 	{
         size_t src = (size_t)(p - mark + 1);
         int bXor;
@@ -2562,7 +2582,7 @@ st12:
 	if ( ++p == pe )
 		goto _test_eof12;
 case 12:
-#line 2566 "src/color_ops.c"
+#line 2586 "src/color_ops.c"
 	switch( (*p) ) {
 		case 0u: goto st0;
 		case 224u: goto tr9;
@@ -2591,62 +2611,62 @@ st0:
 cs = 0;
 	goto _out;
 tr8:
-#line 1214 "src/color_ops.rl"
+#line 1234 "src/color_ops.rl"
 	{ mark = p; }
 	goto st1;
 st1:
 	if ( ++p == pe )
 		goto _test_eof1;
 case 1:
-#line 2602 "src/color_ops.c"
+#line 2622 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto tr0;
 	goto st0;
 tr9:
-#line 1214 "src/color_ops.rl"
+#line 1234 "src/color_ops.rl"
 	{ mark = p; }
 	goto st2;
 st2:
 	if ( ++p == pe )
 		goto _test_eof2;
 case 2:
-#line 2614 "src/color_ops.c"
+#line 2634 "src/color_ops.c"
 	if ( 160u <= (*p) && (*p) <= 191u )
 		goto st1;
 	goto st0;
 tr10:
-#line 1214 "src/color_ops.rl"
+#line 1234 "src/color_ops.rl"
 	{ mark = p; }
 	goto st3;
 st3:
 	if ( ++p == pe )
 		goto _test_eof3;
 case 3:
-#line 2626 "src/color_ops.c"
+#line 2646 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto st1;
 	goto st0;
 tr11:
-#line 1214 "src/color_ops.rl"
+#line 1234 "src/color_ops.rl"
 	{ mark = p; }
 	goto st4;
 st4:
 	if ( ++p == pe )
 		goto _test_eof4;
 case 4:
-#line 2638 "src/color_ops.c"
+#line 2658 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 159u )
 		goto st1;
 	goto st0;
 tr12:
-#line 1214 "src/color_ops.rl"
+#line 1234 "src/color_ops.rl"
 	{ mark = p; }
 	goto st5;
 st5:
 	if ( ++p == pe )
 		goto _test_eof5;
 case 5:
-#line 2650 "src/color_ops.c"
+#line 2670 "src/color_ops.c"
 	if ( (*p) < 148u ) {
 		if ( 128u <= (*p) && (*p) <= 147u )
 			goto st1;
@@ -2664,38 +2684,38 @@ case 6:
 		goto tr4;
 	goto st0;
 tr13:
-#line 1214 "src/color_ops.rl"
+#line 1234 "src/color_ops.rl"
 	{ mark = p; }
 	goto st7;
 st7:
 	if ( ++p == pe )
 		goto _test_eof7;
 case 7:
-#line 2675 "src/color_ops.c"
+#line 2695 "src/color_ops.c"
 	if ( 144u <= (*p) && (*p) <= 191u )
 		goto st3;
 	goto st0;
 tr14:
-#line 1214 "src/color_ops.rl"
+#line 1234 "src/color_ops.rl"
 	{ mark = p; }
 	goto st8;
 st8:
 	if ( ++p == pe )
 		goto _test_eof8;
 case 8:
-#line 2687 "src/color_ops.c"
+#line 2707 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto st3;
 	goto st0;
 tr15:
-#line 1214 "src/color_ops.rl"
+#line 1234 "src/color_ops.rl"
 	{ mark = p; }
 	goto st9;
 st9:
 	if ( ++p == pe )
 		goto _test_eof9;
 case 9:
-#line 2699 "src/color_ops.c"
+#line 2719 "src/color_ops.c"
 	if ( (*p) < 176u ) {
 		if ( 128u <= (*p) && (*p) <= 175u )
 			goto st3;
@@ -2713,14 +2733,14 @@ case 10:
 		goto st6;
 	goto st0;
 tr16:
-#line 1214 "src/color_ops.rl"
+#line 1234 "src/color_ops.rl"
 	{ mark = p; }
 	goto st11;
 st11:
 	if ( ++p == pe )
 		goto _test_eof11;
 case 11:
-#line 2724 "src/color_ops.c"
+#line 2744 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 143u )
 		goto st3;
 	goto st0;
@@ -2742,7 +2762,7 @@ case 11:
 	_out: {}
 	}
 
-#line 1257 "src/color_ops.rl"
+#line 1277 "src/color_ops.rl"
 
     *wp = '\0';
     return (size_t)(wp - out);
@@ -3048,7 +3068,8 @@ size_t co_transform(unsigned char *out,
         size_t cb = next_grapheme_plain(pp, (size_t)(pp_end - pp));
         if (cb == 0) break;
 
-        /* Search for this cluster in from-set. */
+        /* Search for this cluster in from-set.
+         * Reverse scan so first match = last occurrence wins. */
         int found = -1;
         for (size_t i = n; i-- > 0; ) {
             if (fspans[i].length == cb &&
@@ -3195,16 +3216,12 @@ size_t co_pos(const unsigned char *haystack, size_t hlen,
     const unsigned char *found = co_search(haystack, hlen, needle, nlen);
     if (!found) return 0;
 
-    /* Count visible code points before the match to get 1-based index. */
-    size_t vis_before = 0;
-    const unsigned char *p = haystack;
-    while (p < found) {
-        p = co_skip_color(p, haystack + hlen);
-        if (p >= found) break;
-        p = co_visible_advance(p, haystack + hlen, 1, NULL);
-        vis_before++;
-    }
-    return vis_before + 1;  /* 1-based */
+    /* Count grapheme CLUSTERS before the match, exactly like fun_pos
+     * (#787): a multi-code-point cluster (skin-tone emoji, ZWJ
+     * sequence) preceding the match is ONE position, not several.
+     * Counting visible code points here made the fold/blob paths
+     * disagree with the interpreter. */
+    return co_cluster_count(haystack, (size_t)(found - haystack)) + 1;
 }
 
 /* ---- co_lpos ---- */
@@ -3255,16 +3272,21 @@ size_t co_member(const unsigned char *target, size_t tlen,
 
     const unsigned char *pe = list + llen;
     const unsigned char *p = list;
-    size_t word_num = 0;
     unsigned char wplain[UTF_BUFSIZE];
 
-    while (p < pe) {
-        /* Skip leading delimiters. */
-        p = co_skip_color(p, pe);
-        if (p >= pe) break;
-        if (*p == delim) { p++; continue; }
+    /* Mirror fun_member's trim_space_sep + split_token walk.  For the
+     * space delimiter, leading/trailing spaces are trimmed and runs of
+     * spaces collapse.  For any other delimiter, EVERY occurrence is a
+     * word boundary and empty words are real words (#789):
+     * member(a||b,,|) is 2.  Note split_token always yields at least
+     * one (possibly empty) word, so member(,) is 1, not 0. */
+    if (delim == ' ') {
+        while (p < pe && *p == ' ') p++;
+        while (pe > p && pe[-1] == ' ') pe--;
+    }
 
-        /* Found start of a word. */
+    size_t word_num = 0;
+    for (;;) {
         word_num++;
         const unsigned char *word_start = p;
 
@@ -3281,6 +3303,9 @@ size_t co_member(const unsigned char *target, size_t tlen,
 
         if (!d) break;
         p = d + 1;
+        if (delim == ' ') {
+            while (p < pe && *p == ' ') p++;
+        }
     }
 
     return 0;  /* not found */
@@ -3288,99 +3313,292 @@ size_t co_member(const unsigned char *target, size_t tlen,
 
 /* ---- column-width helpers ---- */
 
-/*
- * co_visual_width — Total display column width, skipping PUA color.
- */
-size_t co_visual_width(const unsigned char *p, size_t len)
-{
-    const unsigned char *pe = p + len;
-    size_t cols = 0;
-    while (p < pe) {
-        /* Skip PUA color codes. */
-        if (p[0] == 0xEF && (p + 2) < pe
-            && p[1] >= 0x94 && p[1] <= 0x9F) {
-            p += 3;
-            continue;
-        }
-        if (p[0] == 0xF3 && (p + 3) < pe
-            && p[1] >= 0xB0 && p[1] <= 0xB3) {
-            p += 4;
-            continue;
-        }
-        /* Visible code point — get column width. */
-        cols += (size_t)co_console_width(p);
-        /* Advance past UTF-8 sequence. */
-        if (*p < 0x80)      p += 1;
-        else if (*p < 0xE0) p += 2;
-        else if (*p < 0xF0) p += 3;
-        else                p += 4;
-    }
-    return cols;
-}
-
-/*
- * co_copy_columns — Copy up to ncols display columns, preserving color.
- *
- * Stops before emitting a character that would exceed the column limit.
- * Returns bytes written to out.
- */
-size_t co_copy_columns(unsigned char *out, const unsigned char *p,
-                       const unsigned char *pe, size_t ncols)
-{
-    unsigned char *wp = out;
-    const unsigned char *wp_end = out + UTF_BUFSIZE - 1;
-    size_t cols_emitted = 0;
-
-    while (p < pe && wp < wp_end) {
-        /* Copy PUA color codes transparently. */
-        if (p[0] == 0xEF && (p + 2) < pe
-            && p[1] >= 0x94 && p[1] <= 0x9F) {
-            if (wp + 3 <= wp_end) {
-                wp[0] = p[0]; wp[1] = p[1]; wp[2] = p[2];
-                wp += 3;
-            }
-            p += 3;
-            continue;
-        }
-        if (p[0] == 0xF3 && (p + 3) < pe
-            && p[1] >= 0xB0 && p[1] <= 0xB3) {
-            if (wp + 4 <= wp_end) {
-                wp[0] = p[0]; wp[1] = p[1]; wp[2] = p[2]; wp[3] = p[3];
-                wp += 4;
-            }
-            p += 4;
-            continue;
-        }
-
-        /* Visible code point. */
-        int w = co_console_width(p);
-        if (cols_emitted + (size_t)w > ncols) break;
-
-        size_t cplen;
-        if (*p < 0x80)      cplen = 1;
-        else if (*p < 0xE0) cplen = 2;
-        else if (*p < 0xF0) cplen = 3;
-        else                cplen = 4;
-
-        if (wp + cplen > wp_end) break;
-        for (size_t i = 0; i < cplen && p + i < pe; i++)
-            wp[i] = p[i];
-        wp += cplen;
-        p += cplen;
-        cols_emitted += (size_t)w;
-    }
-
-    *wp = '\0';
-    return (size_t)(wp - out);
-}
-
-/* Forward declarations for color helpers defined later in file. */
+/* Color parsers / emitters defined later; needed by co_copy_field. */
 static int parse_bmp_color(const unsigned char *p, co_ColorState *cs);
 static int parse_smp_color(const unsigned char *p, co_ColorState *cs);
 static size_t emit_transition(unsigned char *wp,
                               const unsigned char *wp_end,
                               const co_ColorState *old_cs,
                               const co_ColorState *new_cs);
+
+/*
+ * cluster_console_width — display column width of one grapheme cluster.
+ *
+ * A cluster occupies one glyph cell on screen even when built from several
+ * code points: combining marks (width 0), ZWJ-joined emoji (GB11) and emoji
+ * skin-tone / variation modifiers all fold into the base glyph.  Its width is
+ * therefore the widest of its code points, not their sum — so a "family" ZWJ
+ * sequence or a modified emoji counts as one wide glyph (2) rather than 4–6.
+ *
+ * Exceptions that no per-code-point table can express alone (#1649):
+ *   - Regional Indicator pair (GB12/13): two Neutral (1) points render as a
+ *     single double-wide flag → force 2.
+ *   - U+FE0F (emoji presentation selector) after an otherwise single-cell
+ *     base (e.g. ❤) asks clients for the emoji form → force 2.
+ *
+ * There is no ground truth for cluster width on a MUD; this is policy.
+ *
+ * `cb` is the cluster's byte length as returned by next_grapheme_plain().
+ */
+static size_t cluster_console_width(const unsigned char *p, size_t cb)
+{
+    const unsigned char *pe = p + cb;
+    const unsigned char *q = p;
+    int baseGCB = -1;
+    size_t nCp = 0;
+    int wMax = 0;
+    int has_vs16 = 0;
+    while (q < pe) {
+        const unsigned char *qn = utf8_cp_advance(q, pe);
+        if (baseGCB < 0) baseGCB = gcb_get(q, qn);
+        /* U+FE0F = EF B8 8F */
+        if (qn - q == 3 && q[0] == 0xEF && q[1] == 0xB8 && q[2] == 0x8F) {
+            has_vs16 = 1;
+        }
+        int w = co_console_width(q);
+        if (w > wMax) wMax = w;
+        nCp++;
+        q = qn;
+    }
+    if (GCB_Regional_Indicator == baseGCB && nCp >= 2) {
+        return 2;
+    }
+    if (has_vs16 && wMax < 2) {
+        wMax = 2;
+    }
+    return (size_t)wMax;
+}
+
+/*
+ * co_cluster_width — width of the first grapheme cluster in a PUA string.
+ */
+size_t co_cluster_width(const unsigned char *data, size_t len)
+{
+    if (NULL == data || 0 == len) {
+        return 0;
+    }
+    unsigned char plain[UTF_BUFSIZE];
+    size_t plen = co_strip_color(plain, data, len);
+    if (0 == plen) {
+        return 0;
+    }
+    size_t cb = next_grapheme_plain(plain, plen);
+    if (0 == cb) {
+        return 0;
+    }
+    return cluster_console_width(plain, cb);
+}
+
+/*
+ * co_visual_width — Total display column width, skipping PUA color.
+ *
+ * Width is measured per grapheme cluster (see cluster_console_width), not per
+ * code point, so ZWJ emoji sequences, skin-tone-modified emoji and flags each
+ * count as a single glyph.
+ */
+size_t co_visual_width(const unsigned char *p, size_t len)
+{
+    /* Strip color so grapheme segmentation sees plain text. */
+    unsigned char plain[UTF_BUFSIZE];
+    size_t plen = co_strip_color(plain, p, len);
+
+    size_t cols = 0;
+    size_t nConsumed = 0;
+    while (nConsumed < plen) {
+        size_t cb = next_grapheme_plain(plain + nConsumed, plen - nConsumed);
+        if (0 == cb) break;
+        cols += cluster_console_width(plain + nConsumed, cb);
+        nConsumed += cb;
+    }
+    return cols;
+}
+
+/* Worst-case bytes to return color state to CO_CS_NORMAL (one RESET PUA). */
+#define CO_COLOR_CLOSE_BYTES 3
+
+/*
+ * Measure how many source bytes a cluster will cost, including interleaved
+ * color codes that sit between its visible code points, without writing.
+ * Updates *pp and *cs as if the cluster were copied.
+ */
+static size_t measure_cluster_bytes(const unsigned char **pp,
+                                    const unsigned char *pe,
+                                    size_t cplen,
+                                    co_ColorState *cs)
+{
+    const unsigned char *p = *pp;
+    size_t copied = 0;
+    size_t nbytes = 0;
+    while (copied < cplen && p < pe) {
+        if (p[0] == 0xEF && (p + 2) < pe
+            && p[1] >= 0x94 && p[1] <= 0x9F) {
+            parse_bmp_color(p, cs);
+            p += 3;
+            nbytes += 3;
+            continue;
+        }
+        if (p[0] == 0xF3 && (p + 3) < pe
+            && p[1] >= 0xB0 && p[1] <= 0xB3) {
+            parse_smp_color(p, cs);
+            p += 4;
+            nbytes += 4;
+            continue;
+        }
+        /* One visible byte of the cluster. */
+        p++;
+        nbytes++;
+        copied++;
+    }
+    *pp = p;
+    return nbytes;
+}
+
+/*
+ * co_copy_field — column-limited copy with hard byte limit, cluster cuts,
+ * and color close on truncate (#1649).
+ */
+co_field co_copy_field(unsigned char *out, size_t nOutMax,
+                       const unsigned char *p, const unsigned char *pe,
+                       size_t nCols)
+{
+    co_field fld = { 0, 0 };
+
+    if (NULL == out || 0 == nOutMax) {
+        return fld;
+    }
+    out[0] = '\0';
+    if (NULL == p) {
+        return fld;
+    }
+    if (NULL == pe) {
+        pe = p + strlen((const char *)p);
+    }
+    if (p >= pe || 0 == nCols) {
+        return fld;
+    }
+
+    /*
+     * Segment graphemes on the STRIPPED text so a color code inside a
+     * cluster cannot split it (#787).  Bytes are still copied from the
+     * original buffer, with interleaved color codes passed through.
+     */
+    unsigned char plain[UTF_BUFSIZE];
+    size_t plen = co_strip_color(plain, p, (size_t)(pe - p));
+
+    /* Capacity excluding the trailing NUL. */
+    size_t usable = nOutMax - 1;
+    unsigned char *wp = out;
+    const unsigned char *wp_end = out + usable;
+
+    size_t cols_emitted = 0;
+    size_t pn = 0;
+    co_ColorState cs = CO_CS_NORMAL;
+    co_ColorState normal = CO_CS_NORMAL;
+
+    while (p < pe && wp < wp_end) {
+        /* Leading color (zero columns) before the next cluster. */
+        if (p[0] == 0xEF && (p + 2) < pe
+            && p[1] >= 0x94 && p[1] <= 0x9F) {
+            co_ColorState trial = cs;
+            parse_bmp_color(p, &trial);
+            size_t close = co_cs_equal(&trial, &normal) ? 0 : CO_COLOR_CLOSE_BYTES;
+            if ((size_t)(wp_end - wp) < 3 + close) {
+                break;
+            }
+            parse_bmp_color(p, &cs);
+            memcpy(wp, p, 3);
+            wp += 3;
+            p += 3;
+            continue;
+        }
+        if (p[0] == 0xF3 && (p + 3) < pe
+            && p[1] >= 0xB0 && p[1] <= 0xB3) {
+            co_ColorState trial = cs;
+            parse_smp_color(p, &trial);
+            size_t close = co_cs_equal(&trial, &normal) ? 0 : CO_COLOR_CLOSE_BYTES;
+            if ((size_t)(wp_end - wp) < 4 + close) {
+                break;
+            }
+            parse_smp_color(p, &cs);
+            memcpy(wp, p, 4);
+            wp += 4;
+            p += 4;
+            continue;
+        }
+
+        if (pn >= plen) {
+            break;
+        }
+        size_t cplen = next_grapheme_plain(plain + pn, plen - pn);
+        if (0 == cplen) {
+            break;
+        }
+
+        size_t w = cluster_console_width(plain + pn, cplen);
+        if (cols_emitted + w > nCols) {
+            break;
+        }
+
+        /*
+         * Measure the cluster (color + visible) without writing, and leave
+         * room for a RESET if stopping here would leave non-normal color.
+         * Color is zero-width state, not a display unit: a column cut that
+         * cannot also close bleeds into whatever follows (#1649).
+         */
+        const unsigned char *pProbe = p;
+        co_ColorState csProbe = cs;
+        size_t need = measure_cluster_bytes(&pProbe, pe, cplen, &csProbe);
+        size_t close = co_cs_equal(&csProbe, &normal) ? 0 : CO_COLOR_CLOSE_BYTES;
+        if ((size_t)(wp_end - wp) < need + close) {
+            break;
+        }
+
+        /* Accept: copy for real. */
+        size_t copied = 0;
+        while (copied < cplen && p < pe) {
+            if (p[0] == 0xEF && (p + 2) < pe
+                && p[1] >= 0x94 && p[1] <= 0x9F) {
+                parse_bmp_color(p, &cs);
+                memcpy(wp, p, 3);
+                wp += 3;
+                p += 3;
+                continue;
+            }
+            if (p[0] == 0xF3 && (p + 3) < pe
+                && p[1] >= 0xB0 && p[1] <= 0xB3) {
+                parse_smp_color(p, &cs);
+                memcpy(wp, p, 4);
+                wp += 4;
+                p += 4;
+                continue;
+            }
+            *wp++ = *p++;
+            copied++;
+        }
+        pn += cplen;
+        cols_emitted += w;
+    }
+
+    /* Close color if we ended mid-run and have room (reserved above). */
+    if (!co_cs_equal(&cs, &normal) && (size_t)(wp_end - wp) >= CO_COLOR_CLOSE_BYTES) {
+        wp += emit_transition(wp, wp_end, &cs, &normal);
+    }
+
+    *wp = '\0';
+    fld.bytes = (size_t)(wp - out);
+    fld.columns = cols_emitted;
+    return fld;
+}
+
+/*
+ * co_copy_columns — legacy entry; wraps co_copy_field with UTF_BUFSIZE.
+ */
+size_t co_copy_columns(unsigned char *out, const unsigned char *p,
+                       const unsigned char *pe, size_t ncols)
+{
+    co_field fld = co_copy_field(out, UTF_BUFSIZE, p, pe, ncols);
+    return fld.bytes;
+}
 
 /*
  * strip_crnltab — Remove \r, \n, \t from fill pattern in-place.
@@ -3406,6 +3624,16 @@ typedef struct {
     int width;              /* display column width */
     co_ColorState color;    /* color state at this position */
 } fill_char_t;
+
+/*
+ * Maximum distinct fill characters parsed from a fill pattern.  The fill
+ * is the cyclic pad argument to center()/ljust()/rjust(), almost always a
+ * handful of characters, so one fill_char_t per buffer byte was a large
+ * stack frame for nothing (an instant stack overflow on Windows's 1 MB
+ * default reserve).  A pattern with more than this many visible
+ * characters repeats from the start at this boundary.
+ */
+#define CO_FILL_CHARS_MAX 256
 
 /*
  * parse_fill_chars — Pre-process fill pattern into per-character colors.
@@ -3599,9 +3827,9 @@ size_t co_center(unsigned char *out,
     }
 
     /* Parse fill into per-character colors. */
-    fill_char_t fchars[UTF_BUFSIZE];
+    fill_char_t fchars[CO_FILL_CHARS_MAX];
     size_t fill_width = 0;
-    size_t nfchars = parse_fill_chars(fchars, UTF_BUFSIZE, fill_buf, flen,
+    size_t nfchars = parse_fill_chars(fchars, CO_FILL_CHARS_MAX, fill_buf, flen,
                                       &fill_width);
     if (fill_width == 0) {
         /* Default to space fill. */
@@ -3674,9 +3902,9 @@ size_t co_ljust(unsigned char *out,
     }
 
     /* Parse fill into per-character colors. */
-    fill_char_t fchars[UTF_BUFSIZE];
+    fill_char_t fchars[CO_FILL_CHARS_MAX];
     size_t fill_width = 0;
-    size_t nfchars = parse_fill_chars(fchars, UTF_BUFSIZE, fill_buf, flen,
+    size_t nfchars = parse_fill_chars(fchars, CO_FILL_CHARS_MAX, fill_buf, flen,
                                       &fill_width);
     if (fill_width == 0) {
         fchars[0].bytes[0] = ' ';
@@ -3740,9 +3968,9 @@ size_t co_rjust(unsigned char *out,
     }
 
     /* Parse fill into per-character colors. */
-    fill_char_t fchars[UTF_BUFSIZE];
+    fill_char_t fchars[CO_FILL_CHARS_MAX];
     size_t fill_width = 0;
-    size_t nfchars = parse_fill_chars(fchars, UTF_BUFSIZE, fill_buf, flen,
+    size_t nfchars = parse_fill_chars(fchars, CO_FILL_CHARS_MAX, fill_buf, flen,
                                       &fill_width);
     if (fill_width == 0) {
         fchars[0].bytes[0] = ' ';
@@ -3870,24 +4098,44 @@ static size_t split_words(const unsigned char *data, size_t len,
     const unsigned char *pe = data + len;
     const unsigned char *p = data;
     size_t count = 0;
+    int is_space = (delim == ' ');
 
-    while (p < pe && count < max_words) {
-        /* Skip delimiters and color. */
-        const unsigned char *q = co_skip_color(p, pe);
-        if (q >= pe) break;
-        if (*q == delim) { p = q + 1; continue; }
+    if (is_space) {
+        /* Space-compress mode: skip leading spaces/color, then split. */
+        while (p < pe && count < max_words) {
+            const unsigned char *q = co_skip_color(p, pe);
+            if (q >= pe) break;
+            if (*q == ' ') { p = q + 1; continue; }
 
-        /* Start of word (include preceding color). */
-        const unsigned char *word_start = p;
-        const unsigned char *d = co_find_delim(q, pe, delim);
-        const unsigned char *word_end = d ? d : pe;
+            const unsigned char *word_start = p;
+            const unsigned char *d = co_find_delim(q, pe, ' ');
+            const unsigned char *word_end = d ? d : pe;
 
-        words[count].start = word_start;
-        words[count].end = word_end;
-        count++;
+            words[count].start = word_start;
+            words[count].end = word_end;
+            count++;
 
-        if (!d) break;
-        p = d + 1;
+            if (!d) break;
+            p = d + 1;
+        }
+    } else {
+        /* Non-space delimiter: each occurrence is significant,
+         * empty words are possible.  Empty input yields 0 words. */
+        if (len > 0) {
+            while (count + 1 < max_words) {
+                const unsigned char *d = co_find_delim(p, pe, delim);
+                if (!d) break;
+
+                words[count].start = p;
+                words[count].end = d;
+                count++;
+                p = d + 1;
+            }
+            /* Last word: everything after the final delimiter. */
+            words[count].start = p;
+            words[count].end = pe;
+            count++;
+        }
     }
     return count;
 }
@@ -4075,6 +4323,70 @@ size_t co_replace_at(unsigned char *out,
     return (size_t)(wp - out);
 }
 
+size_t co_delete_at(unsigned char *out,
+                    const unsigned char *list, size_t llen,
+                    int *positions, int nPositions,
+                    unsigned char delim, unsigned char osep)
+{
+    if (llen == 0 || !list) {
+        out[0] = '\0';
+        return 0;
+    }
+
+    word_range_t words[UTF_BUFSIZE / 2];
+    size_t nWords = split_words(list, llen, delim, words, UTF_BUFSIZE / 2);
+
+    /* Convert positions: negative wraps, positive 1-based to 0-based.
+     * Out-of-range positions are dropped (swap-with-last). */
+    int j;
+    for (j = 0; j < nPositions; ) {
+        if (positions[j] < 0) {
+            positions[j] += (int)nWords;
+        } else {
+            positions[j] -= 1;
+        }
+        if (positions[j] < 0 || positions[j] >= (int)nWords) {
+            positions[j] = positions[nPositions - 1];
+            nPositions--;
+        } else {
+            j++;
+        }
+    }
+
+    sort_ints(positions, nPositions);
+
+    unsigned char *wp = out;
+    const unsigned char *wp_end = out + UTF_BUFSIZE - 1;
+    size_t i = 0;
+    int emitted = 0;
+
+    for (j = 0; j < nPositions; j++) {
+        while (i < (size_t)positions[j] && wp < wp_end) {
+            if (emitted) WP_SAFE(wp, wp_end, osep);
+            size_t cb = (size_t)(words[i].end - words[i].start);
+            wp += wp_safe_copy(wp, wp_end, words[i].start, cb);
+            emitted = 1;
+            i++;
+        }
+        /* Skip the word at this position (delete it). */
+        i++;
+        /* Collapse duplicate positions: a word deleted once is not
+         * revisited. */
+        while (j < nPositions - 1 && positions[j] == positions[j + 1]) j++;
+    }
+
+    while (i < nWords && wp < wp_end) {
+        if (emitted) WP_SAFE(wp, wp_end, osep);
+        size_t cb = (size_t)(words[i].end - words[i].start);
+        wp += wp_safe_copy(wp, wp_end, words[i].start, cb);
+        emitted = 1;
+        i++;
+    }
+
+    *wp = '\0';
+    return (size_t)(wp - out);
+}
+
 size_t co_insert_at(unsigned char *out,
                     const unsigned char *list, size_t llen,
                     int *positions, int nPositions,
@@ -4093,6 +4405,8 @@ size_t co_insert_at(unsigned char *out,
             if (positions[k] == 1 || positions[k] == -1) { found = 1; break; }
         }
         if (!found) { out[0] = '\0'; return 0; }
+        /* Fall through to normal processing — the position conversion
+         * and loop handle multiple insertions (e.g., positions 1 1). */
     }
 
     int j;
@@ -4188,21 +4502,23 @@ static int cmp_ascii_ci(const void *a, const void *b)
     return (sa->plain_len > sb->plain_len) - (sa->plain_len < sb->plain_len);
 }
 
-static long parse_long(const unsigned char *p, size_t len)
+/* Full-width integer parse for sort keys (#1402).  Avoid atol() — long is
+ * 32-bit on LLP64 and truncates large softcode-ish numeric prefixes. */
+static int64_t parse_i64(const unsigned char *p, size_t len)
 {
     char buf[64];
     size_t n = len < 63 ? len : 63;
     memcpy(buf, p, n);
     buf[n] = '\0';
-    return atol(buf);
+    return (int64_t)strtoll(buf, NULL, 10);
 }
 
 static int cmp_numeric(const void *a, const void *b)
 {
     const sort_elem_t *sa = (const sort_elem_t *)a;
     const sort_elem_t *sb = (const sort_elem_t *)b;
-    long la = parse_long(sa->plain, sa->plain_len);
-    long lb = parse_long(sb->plain, sb->plain_len);
+    int64_t la = parse_i64(sa->plain, sa->plain_len);
+    int64_t lb = parse_i64(sb->plain, sb->plain_len);
     return (la > lb) - (la < lb);
 }
 
@@ -4217,8 +4533,8 @@ static int cmp_dbref(const void *a, const void *b)
     size_t lb = sb->plain_len;
     if (la > 0 && *pa == '#') { pa++; la--; }
     if (lb > 0 && *pb == '#') { pb++; lb--; }
-    long da = parse_long(pa, la);
-    long db = parse_long(pb, lb);
+    int64_t da = parse_i64(pa, la);
+    int64_t db = parse_i64(pb, lb);
     return (da > db) - (da < db);
 }
 
@@ -4241,9 +4557,16 @@ static size_t build_sort_elems(sort_elem_t *elems,
     for (size_t i = 0; i < nWords; i++) {
         elems[i].start = words[i].start;
         elems[i].end = words[i].end;
+        /* plain[] is 256 bytes but co_strip_color clamps at UTF_BUFSIZE-1.
+         * Stripping never grows output, so capping the INPUT at
+         * sizeof(plain)-1 bounds the output (plus NUL) to the buffer.
+         * Words longer than 255 bytes compare by their prefix. */
+        size_t cb = (size_t)(words[i].end - words[i].start);
+        if (cb > sizeof(elems[i].plain) - 1) {
+            cb = sizeof(elems[i].plain) - 1;
+        }
         elems[i].plain_len = co_strip_color(
-            elems[i].plain, words[i].start,
-            (size_t)(words[i].end - words[i].start));
+            elems[i].plain, words[i].start, cb);
     }
     return nWords;
 }
@@ -4264,6 +4587,12 @@ static size_t emit_sorted(unsigned char *out,
     return (size_t)(wp - out);
 }
 
+/* NOTE: the sort/set-op scratch below lives on the stack to preserve the
+ * library's zero-allocation guarantee.  sort_elem_t embeds a 256-byte
+ * comparison key, so these frames are large (several MB at the default
+ * UTF_BUFSIZE of 8000) — call these functions from a thread with a
+ * generous stack, and think twice before raising UTF_BUFSIZE. */
+
 /* ---- co_sort_words ---- */
 
 size_t co_sort_words(unsigned char *out,
@@ -4275,15 +4604,14 @@ size_t co_sort_words(unsigned char *out,
     size_t nWords = split_words(list, llen, delim, words, UTF_BUFSIZE / 2);
 
     if (nWords <= 1) {
+        size_t cb = 0;
         if (nWords == 1) {
-            size_t cb = (size_t)(words[0].end - words[0].start);
+            cb = (size_t)(words[0].end - words[0].start);
             if (cb > UTF_BUFSIZE - 1) cb = UTF_BUFSIZE - 1;
             memcpy(out, words[0].start, cb);
-            out[cb] = '\0';
-            return cb;
         }
-        out[0] = '\0';
-        return 0;
+        out[cb] = '\0';
+        return cb;
     }
 
     sort_elem_t elems[UTF_BUFSIZE / 2];
@@ -4322,8 +4650,18 @@ size_t co_setunion(unsigned char *out,
     qsort(e1, n1, sizeof(sort_elem_t), cmp);
     qsort(e2, n2, sizeof(sort_elem_t), cmp);
 
-    /* Merge sorted arrays, skipping duplicates. */
+    /* handle_sets special-cases two identical single-element lists and
+     * emits LIST1's copy there -- the opposite of the general merge's
+     * tie rule below, which takes LIST2's.  The copies can differ in
+     * color even when the comparison keys are equal. */
+    if (n1 == 1 && n2 == 1 && cmp(&e1[0], &e2[0]) == 0) {
+        return emit_sorted(out, e1, 1, osep);
+    }
+
+    /* Merge scratch. */
     sort_elem_t merged[UTF_BUFSIZE];
+
+    /* Merge sorted arrays, skipping duplicates. */
     size_t nm = 0;
     size_t i = 0, j = 0;
 
@@ -4338,8 +4676,12 @@ size_t co_setunion(unsigned char *out,
                 merged[nm++] = e2[j];
             j++;
         } else {
-            if (nm == 0 || !elems_equal(&merged[nm-1], &e1[i], cmp))
-                merged[nm++] = e1[i];
+            /* Equal: emit LIST2's copy.  handle_sets' SET_UNION takes
+             * sc2 on ties (its `< 0` test sends equals to the else
+             * branch), and the copies can differ in color even when
+             * the stripped comparison keys are equal. */
+            if (nm == 0 || !elems_equal(&merged[nm-1], &e2[j], cmp))
+                merged[nm++] = e2[j];
             i++;
             j++;
         }
@@ -4371,6 +4713,7 @@ size_t co_setdiff(unsigned char *out,
     size_t n2 = split_words(list2, len2, delim, w2, UTF_BUFSIZE / 2);
 
     sort_elem_t e1[UTF_BUFSIZE / 2], e2[UTF_BUFSIZE / 2];
+    sort_elem_t result[UTF_BUFSIZE / 2];
     build_sort_elems(e1, w1, n1);
     build_sort_elems(e2, w2, n2);
 
@@ -4379,7 +4722,6 @@ size_t co_setdiff(unsigned char *out,
     qsort(e2, n2, sizeof(sort_elem_t), cmp);
 
     /* Emit elements from e1 that are NOT in e2, skip duplicates. */
-    sort_elem_t result[UTF_BUFSIZE / 2];
     size_t nr = 0;
     size_t i = 0, j = 0;
 
@@ -4418,6 +4760,7 @@ size_t co_setinter(unsigned char *out,
     size_t n2 = split_words(list2, len2, delim, w2, UTF_BUFSIZE / 2);
 
     sort_elem_t e1[UTF_BUFSIZE / 2], e2[UTF_BUFSIZE / 2];
+    sort_elem_t result[UTF_BUFSIZE / 2];
     build_sort_elems(e1, w1, n1);
     build_sort_elems(e2, w2, n2);
 
@@ -4426,7 +4769,6 @@ size_t co_setinter(unsigned char *out,
     qsort(e2, n2, sizeof(sort_elem_t), cmp);
 
     /* Emit elements present in both, skip duplicates. */
-    sort_elem_t result[UTF_BUFSIZE / 2];
     size_t nr = 0;
     size_t i = 0, j = 0;
 
@@ -5154,13 +5496,13 @@ unsigned char co_dfa_ascii(const unsigned char *p)
 /* ---- co_render_ascii ---- */
 
 
-#line 5158 "src/color_ops.c"
+#line 5500 "src/color_ops.c"
 static const int render_ascii_start = 12;
 
 static const int render_ascii_en_main = 12;
 
 
-#line 3687 "src/color_ops.rl"
+#line 4029 "src/color_ops.rl"
 
 
 size_t co_render_ascii(unsigned char *out,
@@ -5174,21 +5516,21 @@ size_t co_render_ascii(unsigned char *out,
     const unsigned char *wp_end = out + UTF_BUFSIZE - 1;
 
     
-#line 5178 "src/color_ops.c"
+#line 5520 "src/color_ops.c"
 	{
 	cs = render_ascii_start;
 	}
 
-#line 3700 "src/color_ops.rl"
+#line 4042 "src/color_ops.rl"
     
-#line 5185 "src/color_ops.c"
+#line 5527 "src/color_ops.c"
 	{
 	if ( p == pe )
 		goto _test_eof;
 	switch ( cs )
 	{
 tr0:
-#line 3672 "src/color_ops.rl"
+#line 4014 "src/color_ops.rl"
 	{
         /* Run visible code point through tr_ascii DFA for approximation. */
         if (*mark < 0x80) {
@@ -5202,9 +5544,9 @@ tr0:
     }
 	goto st12;
 tr7:
-#line 3671 "src/color_ops.rl"
+#line 4013 "src/color_ops.rl"
 	{ mark = p; }
-#line 3672 "src/color_ops.rl"
+#line 4014 "src/color_ops.rl"
 	{
         /* Run visible code point through tr_ascii DFA for approximation. */
         if (*mark < 0x80) {
@@ -5221,7 +5563,7 @@ st12:
 	if ( ++p == pe )
 		goto _test_eof12;
 case 12:
-#line 5225 "src/color_ops.c"
+#line 5567 "src/color_ops.c"
 	switch( (*p) ) {
 		case 0u: goto st0;
 		case 224u: goto tr9;
@@ -5250,62 +5592,62 @@ st0:
 cs = 0;
 	goto _out;
 tr8:
-#line 3671 "src/color_ops.rl"
+#line 4013 "src/color_ops.rl"
 	{ mark = p; }
 	goto st1;
 st1:
 	if ( ++p == pe )
 		goto _test_eof1;
 case 1:
-#line 5261 "src/color_ops.c"
+#line 5603 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto tr0;
 	goto st0;
 tr9:
-#line 3671 "src/color_ops.rl"
+#line 4013 "src/color_ops.rl"
 	{ mark = p; }
 	goto st2;
 st2:
 	if ( ++p == pe )
 		goto _test_eof2;
 case 2:
-#line 5273 "src/color_ops.c"
+#line 5615 "src/color_ops.c"
 	if ( 160u <= (*p) && (*p) <= 191u )
 		goto st1;
 	goto st0;
 tr10:
-#line 3671 "src/color_ops.rl"
+#line 4013 "src/color_ops.rl"
 	{ mark = p; }
 	goto st3;
 st3:
 	if ( ++p == pe )
 		goto _test_eof3;
 case 3:
-#line 5285 "src/color_ops.c"
+#line 5627 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto st1;
 	goto st0;
 tr11:
-#line 3671 "src/color_ops.rl"
+#line 4013 "src/color_ops.rl"
 	{ mark = p; }
 	goto st4;
 st4:
 	if ( ++p == pe )
 		goto _test_eof4;
 case 4:
-#line 5297 "src/color_ops.c"
+#line 5639 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 159u )
 		goto st1;
 	goto st0;
 tr12:
-#line 3671 "src/color_ops.rl"
+#line 4013 "src/color_ops.rl"
 	{ mark = p; }
 	goto st5;
 st5:
 	if ( ++p == pe )
 		goto _test_eof5;
 case 5:
-#line 5309 "src/color_ops.c"
+#line 5651 "src/color_ops.c"
 	if ( (*p) < 148u ) {
 		if ( 128u <= (*p) && (*p) <= 147u )
 			goto st1;
@@ -5323,38 +5665,38 @@ case 6:
 		goto st12;
 	goto st0;
 tr13:
-#line 3671 "src/color_ops.rl"
+#line 4013 "src/color_ops.rl"
 	{ mark = p; }
 	goto st7;
 st7:
 	if ( ++p == pe )
 		goto _test_eof7;
 case 7:
-#line 5334 "src/color_ops.c"
+#line 5676 "src/color_ops.c"
 	if ( 144u <= (*p) && (*p) <= 191u )
 		goto st3;
 	goto st0;
 tr14:
-#line 3671 "src/color_ops.rl"
+#line 4013 "src/color_ops.rl"
 	{ mark = p; }
 	goto st8;
 st8:
 	if ( ++p == pe )
 		goto _test_eof8;
 case 8:
-#line 5346 "src/color_ops.c"
+#line 5688 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 191u )
 		goto st3;
 	goto st0;
 tr15:
-#line 3671 "src/color_ops.rl"
+#line 4013 "src/color_ops.rl"
 	{ mark = p; }
 	goto st9;
 st9:
 	if ( ++p == pe )
 		goto _test_eof9;
 case 9:
-#line 5358 "src/color_ops.c"
+#line 5700 "src/color_ops.c"
 	if ( (*p) < 176u ) {
 		if ( 128u <= (*p) && (*p) <= 175u )
 			goto st3;
@@ -5372,14 +5714,14 @@ case 10:
 		goto st6;
 	goto st0;
 tr16:
-#line 3671 "src/color_ops.rl"
+#line 4013 "src/color_ops.rl"
 	{ mark = p; }
 	goto st11;
 st11:
 	if ( ++p == pe )
 		goto _test_eof11;
 case 11:
-#line 5383 "src/color_ops.c"
+#line 5725 "src/color_ops.c"
 	if ( 128u <= (*p) && (*p) <= 143u )
 		goto st3;
 	goto st0;
@@ -5401,7 +5743,7 @@ case 11:
 	_out: {}
 	}
 
-#line 3701 "src/color_ops.rl"
+#line 4043 "src/color_ops.rl"
 
     *wp = '\0';
     return (size_t)(wp - out);
