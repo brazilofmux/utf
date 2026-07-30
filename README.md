@@ -22,28 +22,28 @@ cd utf && make && make test
 | Collation | `collate.h` | DUCET sort (UTS #10) — multi-level comparison, case-insensitive comparison, and binary sort keys |
 | Tables | `utf_tables.h` | Compressed DFA tables for case mapping, character width, GCB, charset approximation |
 
-## Performance vs ICU 74.2
+## Performance vs ICU 78.3
 
-Benchmarks on the same machine, same test data (`bench/`).  Two
-scenarios: **UTF-8 input** (libutf native — no conversion) and
-**core-to-core** (each library in its native encoding).
+Benchmarks on the same machine (MacBook Pro, Apple M5 Max), same test
+data (`bench/`).  Two scenarios: **UTF-8 input** (libutf native — no
+conversion) and **core-to-core** (each library in its native encoding).
 
 ### UTF-8 input (the common case)
 
-| Operation | libutf | ICU 74.2 | Ratio |
+| Operation | libutf | ICU 78.3 | Ratio |
 |-----------|--------|----------|-------|
-| NFC normalization | 84 ms | 119 ms | **1.4x faster** |
-| NFC quick-check | 183 ms | 387 ms | **2.1x faster** |
-| DUCET collation | 80 ms | 98 ms | **1.2x faster** |
-| Grapheme segmentation | 560 ms | 770 ms | **1.4x faster** |
+| NFC normalization | 28 ms | 59 ms | **2.1x faster** |
+| NFC quick-check | 62 ms | 237 ms | **3.8x faster** |
+| DUCET collation | 31 ms | 40 ms | **1.3x faster** |
+| Grapheme segmentation | 237 ms | 337 ms | **1.4x faster** |
 
 ### Core-to-core (each library in its native encoding)
 
 | Operation | libutf (UTF-8) | ICU (UTF-16) | Ratio |
 |-----------|----------------|--------------|-------|
-| NFC normalization | 84 ms | 92 ms | **libutf 1.1x faster** |
-| DUCET collation | 80 ms | 56 ms | ICU 1.4x faster |
-| Grapheme segmentation | 560 ms | 690 ms | **libutf 1.2x faster** |
+| NFC normalization | 28 ms | 39 ms | **libutf 1.4x faster** |
+| DUCET collation | 31 ms | 22 ms | ICU 1.4x faster |
+| Grapheme segmentation | 237 ms | 277 ms | **libutf 1.2x faster** |
 
 NFC normalization is faster than ICU even core-to-core, thanks to
 a combined CCC+NFC_QC DFA (single lookup instead of two per code
@@ -53,7 +53,7 @@ directly and only decomposes/recomposes dirty segments.
 DUCET collation has a Latin fast path that compares weights inline
 for U+0000..U+017F without DFA traversal or CE array allocation,
 plus fast implicit weights for CJK Unified Ideographs.  With UTF-8
-input libutf is 1.2x faster because ICU pays for UTF-8 → UTF-16
+input libutf is 1.3x faster because ICU pays for UTF-8 → UTF-16
 conversion.  Core-to-core, ICU's UTF-16 encoding advantage (direct
 array indexing vs. byte-level DFA traversal) gives it a 1.4x lead.
 
@@ -72,7 +72,7 @@ general-purpose rule-based break engine.
 
 ## Correctness
 
-NFC normalization and DUCET collation are verified against ICU 74.2
+NFC normalization and DUCET collation are verified against ICU 78.3
 as a reference implementation:
 
 - **NFC**: 31 test cases covering precomposed, decomposed, multi-mark

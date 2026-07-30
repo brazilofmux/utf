@@ -82,7 +82,7 @@ int main(int argc, char **argv)
     ucasemap_close(csm);
 
     printf("%-20s %10.1f ms\n", "libutf (DFA)", libutf_ms);
-    printf("%-20s %10.1f ms\n", "ICU 74.2", icu_ms);
+    printf("%-20s %10.1f ms\n", "ICU", icu_ms);
     printf("%-20s %10.1fx\n", "Speedup", icu_ms / libutf_ms);
 
     return 0;

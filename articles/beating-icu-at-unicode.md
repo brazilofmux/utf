@@ -16,18 +16,18 @@ at it.
 
 ## The numbers
 
-Benchmarks run on the same machine, same test data, same compiler
-flags. ICU 74.2. All times are wall-clock milliseconds for
-identical workloads.
+Benchmarks run on the same machine (a MacBook Pro with an Apple
+M5 Max), same test data, same compiler flags. ICU 78.3. All times
+are wall-clock milliseconds for identical workloads.
 
 ### UTF-8 input (the common case)
 
-| Operation | libutf | ICU 74.2 | Ratio |
+| Operation | libutf | ICU 78.3 | Ratio |
 |-----------|--------|----------|-------|
-| NFC normalization | 84 ms | 119 ms | **1.4x faster** |
-| NFC quick-check | 183 ms | 387 ms | **2.1x faster** |
-| DUCET collation | 80 ms | 98 ms | **1.2x faster** |
-| Grapheme segmentation | 560 ms | 770 ms | **1.4x faster** |
+| NFC normalization | 28 ms | 59 ms | **2.1x faster** |
+| NFC quick-check | 62 ms | 237 ms | **3.8x faster** |
+| DUCET collation | 31 ms | 40 ms | **1.3x faster** |
+| Grapheme segmentation | 237 ms | 337 ms | **1.4x faster** |
 
 Four operations, four wins. The collation result is the one I'm
 most proud of, because two weeks ago ICU was winning that benchmark.
@@ -36,9 +36,9 @@ most proud of, because two weeks ago ICU was winning that benchmark.
 
 | Operation | libutf (UTF-8) | ICU (UTF-16) | Ratio |
 |-----------|----------------|--------------|-------|
-| NFC normalization | 84 ms | 92 ms | **libutf 1.1x faster** |
-| DUCET collation | 80 ms | 56 ms | ICU 1.4x faster |
-| Grapheme segmentation | 560 ms | 690 ms | **libutf 1.2x faster** |
+| NFC normalization | 28 ms | 39 ms | **libutf 1.4x faster** |
+| DUCET collation | 31 ms | 22 ms | ICU 1.4x faster |
+| Grapheme segmentation | 237 ms | 277 ms | **libutf 1.2x faster** |
 
 When each library operates in its native encoding—libutf on UTF-8,
 ICU on UTF-16—NFC normalization and grapheme segmentation are
@@ -134,8 +134,8 @@ Six commits changed that:
   function skips level-3 (case) weights, which is both faster and
   what most applications actually want for search and deduplication.
 
-The result: collation dropped from 120 ms to 80 ms, a 33% speedup.
-On UTF-8 input, libutf is now 1.2x faster than ICU.
+The result: collation dropped by a third of its runtime.  On UTF-8
+input, libutf is now 1.3x faster than ICU.
 
 ## The grapheme story
 
