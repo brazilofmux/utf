@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include "utf/nfc.h"
 #include <unicode/unorm2.h>
 #include <unicode/ustring.h>
@@ -74,6 +75,95 @@ static void test_is_nfc(const char *label, const char *input,
     }
 }
 
+/* --- Differential fuzz: random code point sequences vs ICU --- */
+
+static unsigned int g_rng = 0x1905;
+static unsigned int xrand(void)
+{
+    g_rng = g_rng * 1664525u + 1013904223u;
+    return g_rng >> 8;
+}
+
+/* Alphabet biased toward composition machinery: ASCII, combining marks
+ * of assorted CCC classes, Hangul jamo and precomposed syllables, Latin
+ * precomposed, singletons, CJK, and SMP. */
+static uint32_t fuzz_cp(void)
+{
+    switch (xrand() % 10) {
+        case 0: return 0x20 + (xrand() % 0x5F);            /* ASCII */
+        case 1: return 0x0300 + (xrand() % 0x70);          /* combining marks */
+        case 2: return 0x1100 + (xrand() % 0x13);          /* jamo L */
+        case 3: return 0x1161 + (xrand() % 0x15);          /* jamo V */
+        case 4: return 0x11A8 + (xrand() % 0x1B);          /* jamo T */
+        case 5: return 0xAC00 + (xrand() % 0x2BA4);        /* Hangul syllables */
+        case 6: return 0xC0 + (xrand() % 0x140);           /* Latin-1/Ext-A */
+        case 7: return (xrand() % 2) ? 0x2126 : 0x212B;    /* singletons */
+        case 8: return 0x4E00 + (xrand() % 0x5000);        /* CJK */
+        default: return 0x1D15E + (xrand() % 0x40);        /* SMP (musical) */
+    }
+}
+
+static size_t encode_utf8(uint32_t cp, unsigned char *b)
+{
+    if (cp < 0x80) { b[0] = (unsigned char)cp; return 1; }
+    if (cp < 0x800) { b[0] = 0xC0|(cp>>6); b[1] = 0x80|(cp&63); return 2; }
+    if (cp < 0x10000) {
+        b[0] = 0xE0|(cp>>12); b[1] = 0x80|((cp>>6)&63); b[2] = 0x80|(cp&63);
+        return 3;
+    }
+    b[0] = 0xF0|(cp>>18); b[1] = 0x80|((cp>>12)&63);
+    b[2] = 0x80|((cp>>6)&63); b[3] = 0x80|(cp&63);
+    return 4;
+}
+
+static void fuzz_nfc(const UNormalizer2 *norm, int rounds)
+{
+    int mismatches = 0;
+    for (int r = 0; r < rounds; r++) {
+        unsigned char in[64];
+        size_t inLen = 0;
+        int nCps = 1 + (int)(xrand() % 12);
+        for (int i = 0; i < nCps && inLen + 4 <= sizeof(in); i++)
+            inLen += encode_utf8(fuzz_cp(), in + inLen);
+
+        unsigned char dst[512];
+        size_t nDst;
+        utf_nfc_normalize(in, inLen, dst, sizeof(dst), &nDst);
+
+        UErrorCode err = U_ZERO_ERROR;
+        UChar usrc[256], udst[256];
+        int32_t usrcLen, udstLen;
+        u_strFromUTF8(usrc, 256, &usrcLen, (const char *)in,
+                      (int32_t)inLen, &err);
+        udstLen = unorm2_normalize(norm, usrc, usrcLen, udst, 256, &err);
+        char icu_utf8[512];
+        int32_t icuLen;
+        u_strToUTF8(icu_utf8, 512, &icuLen, udst, udstLen, &err);
+        if (U_FAILURE(err)) continue;
+
+        if ((size_t)icuLen != nDst || memcmp(dst, icu_utf8, nDst) != 0) {
+            if (mismatches < 5) {
+                printf("  FAIL fuzz[%d]: in:", r);
+                for (size_t i = 0; i < inLen; i++) printf(" %02x", in[i]);
+                printf("\n    libutf:");
+                for (size_t i = 0; i < nDst; i++) printf(" %02x", dst[i]);
+                printf("\n    ICU:   ");
+                for (int i = 0; i < icuLen; i++)
+                    printf(" %02x", (unsigned char)icu_utf8[i]);
+                printf("\n");
+            }
+            mismatches++;
+        }
+    }
+    if (mismatches) {
+        printf("  FAIL fuzz: %d/%d mismatched ICU\n", mismatches, rounds);
+        g_fail++;
+    } else {
+        printf("  %d randomized inputs match ICU byte-for-byte\n", rounds);
+        g_pass++;
+    }
+}
+
 int main(void)
 {
     UErrorCode err = U_ZERO_ERROR;
@@ -131,6 +221,20 @@ int main(void)
     /* U+00C5 is already NFC */
     test_nfc("a_ring_precomposed", "\xc3\x85", norm);
 
+    /* --- Blocked composition (UAX #15 D115) --- */
+    /* A starter B is blocked from starter A by ANY intervening mark;
+     * there is no CCC(B)=0 exemption.  An earlier bug composed Hangul
+     * jamo across a mark: U+B3C4 U+032B U+11C1 became U+B3DE U+032B. */
+    test_nfc("jamo_blocked_by_mark", "\xeb\x8f\x84\xcc\xab\xe1\x87\x81", norm);
+    /* L jamo + mark + V jamo: LV composition must also be blocked. */
+    test_nfc("lv_blocked_by_mark", "\xe1\x84\x80\xcc\xab\xe1\x85\xa1", norm);
+    /* Base + grave + ring (both CCC=230): ring blocked by same-class mark,
+     * so Å must not form. */
+    test_nfc("mark_blocked_same_ccc", "A\xcc\x80\xcc\x8a", norm);
+    /* Singleton + mark + composing mark: U+2126 U+0328 U+0301 — the acute
+     * (CCC=230) is NOT blocked by ogonek (CCC=202) and composes with Ω. */
+    test_nfc("mark_composes_over_lower_ccc", "\xe2\x84\xa6\xcc\xa8\xcc\x81", norm);
+
     printf("\n[nfc_is_nfc]\n");
 
     test_is_nfc("ascii", "Hello!", norm);
@@ -141,6 +245,9 @@ int main(void)
     test_is_nfc("ohm_sign", "\xe2\x84\xa6", norm);
     test_is_nfc("cjk", "\xe4\xb8\xad\xe6\x96\x87", norm);
     test_is_nfc("reordered_ccc", "a\xcc\x81\xcc\xa3", norm);
+
+    printf("\n[nfc_fuzz_vs_icu]\n");
+    fuzz_nfc(norm, 100000);
 
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

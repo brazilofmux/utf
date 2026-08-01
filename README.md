@@ -75,10 +75,11 @@ general-purpose rule-based break engine.
 NFC normalization and DUCET collation are verified against ICU 78.3
 as a reference implementation:
 
-- **NFC**: 31 test cases covering precomposed, decomposed, multi-mark
+- **NFC**: 35 test cases covering precomposed, decomposed, multi-mark
   reordering, Hangul algorithmic composition, singleton decompositions
-  (OHM SIGN, ANGSTROM SIGN), and mixed-script strings.  All match ICU
-  byte-for-byte.
+  (OHM SIGN, ANGSTROM SIGN), UAX #15 D115 blocked composition, and
+  mixed-script strings — plus a 100,000-input randomized differential
+  fuzz.  All match ICU byte-for-byte.
 
 - **Collation**: 53 test cases.  33 compare directly against ICU
   across primary (base character), secondary (accent), and tertiary
