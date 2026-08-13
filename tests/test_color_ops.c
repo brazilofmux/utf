@@ -12,6 +12,7 @@
  */
 
 #include "utf/color_ops.h"
+#include "utf/classify.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -4078,6 +4079,162 @@ static void test_list_parity(void) {
     check_buf(name, "colored no-op ldelete", out, r, buf, bn);
 }
 
+/* ---- utf_is_word / utf_is_word_connector ---- */
+
+/* Encode a code point; returns byte length. */
+static size_t cls_enc(unsigned int cp, unsigned char *b) {
+    if (cp < 0x80)    { b[0] = (unsigned char)cp; return 1; }
+    if (cp < 0x800)   { b[0] = (unsigned char)(0xC0|(cp>>6));
+                        b[1] = (unsigned char)(0x80|(cp&63)); return 2; }
+    if (cp < 0x10000) { b[0] = (unsigned char)(0xE0|(cp>>12));
+                        b[1] = (unsigned char)(0x80|((cp>>6)&63));
+                        b[2] = (unsigned char)(0x80|(cp&63)); return 3; }
+    b[0] = (unsigned char)(0xF0|(cp>>18)); b[1] = (unsigned char)(0x80|((cp>>12)&63));
+    b[2] = (unsigned char)(0x80|((cp>>6)&63)); b[3] = (unsigned char)(0x80|(cp&63));
+    return 4;
+}
+
+static void check_word(const char *name, unsigned int cp, int expect,
+                       const char *why) {
+    unsigned char b[4];
+    size_t n = cls_enc(cp, b);
+    int got = utf_is_word(b, b + n);
+    if (got != expect) {
+        test_fail(name, "U+%04X (%s): got %d, expected %d", cp, why, got, expect);
+    } else {
+        test_ok(name, "U+%04X %s = %d", cp, why, got);
+    }
+}
+
+static void test_classify_word(void) {
+    const char *name = "classify_word";
+
+    /* ASCII. */
+    check_word(name, 'a', 1, "latin small a");
+    check_word(name, 'Z', 1, "latin capital Z");
+    check_word(name, '7', 1, "digit seven");
+    check_word(name, ' ', 0, "space");
+    check_word(name, '.', 0, "full stop");
+    check_word(name, '@', 0, "commercial at");
+    check_word(name, '-', 0, "hyphen-minus");
+
+    /* Letters beyond ASCII. */
+    check_word(name, 0x00E9, 1, "e with acute");
+    check_word(name, 0x00DF, 1, "sharp s");
+    check_word(name, 0x0442, 1, "cyrillic te");
+    check_word(name, 0x05D0, 1, "hebrew alef");
+    check_word(name, 0x0627, 1, "arabic alef");
+    check_word(name, 0x6F22, 1, "CJK 'kan'");
+    check_word(name, 0x306E, 1, "hiragana no");
+    check_word(name, 0xAC00, 1, "hangul syllable");
+    check_word(name, 0x1D400, 1, "SMP math bold A");
+
+    /* Marks: a base plus its accents must be one word (Mn, Mc). */
+    check_word(name, 0x0301, 1, "combining acute (Mn)");
+    check_word(name, 0x0323, 1, "combining dot below (Mn)");
+    check_word(name, 0x093E, 1, "devanagari sign aa (Mc)");
+    check_word(name, 0x0F71, 1, "tibetan vowel sign aa (Mn)");
+
+    /* Non-ASCII decimal digits (Nd). */
+    check_word(name, 0x0966, 1, "devanagari digit zero");
+    check_word(name, 0xFF10, 1, "fullwidth digit zero");
+
+    /* Other_Alphabetic: category So, but Alphabetic.  A bare
+     * general-category test misses these; the derived property catches them. */
+    check_word(name, 0x24B6, 1, "circled capital A (So, Other_Alphabetic)");
+    check_word(name, 0x24D0, 1, "circled small a (So, Other_Alphabetic)");
+
+    /* Punctuation and symbols above U+007F: the cases a
+     * "any byte >= 0x80 is word-ish" heuristic gets wrong. */
+    check_word(name, 0x3002, 0, "ideographic full stop");
+    check_word(name, 0x3001, 0, "ideographic comma");
+    check_word(name, 0x2014, 0, "em dash");
+    check_word(name, 0x201C, 0, "left double quote");
+    check_word(name, 0x00A0, 0, "no-break space");
+    check_word(name, 0x20AC, 0, "euro sign (Sc)");
+    check_word(name, 0x1F600, 0, "grinning face (So, not alphabetic)");
+    check_word(name, 0x3000, 0, "ideographic space");
+
+    /* Pc is excluded from the word set on purpose. */
+    check_word(name, '_', 0, "low line (Pc) is not a word char");
+    check_word(name, 0xFF3F, 0, "fullwidth low line (Pc)");
+
+    /* Degenerate input. */
+    check_size(name, "NULL", (size_t)utf_is_word(NULL, NULL), 0);
+    {
+        const unsigned char *e = (const unsigned char *)"a";
+        check_size(name, "empty range", (size_t)utf_is_word(e, e), 0);
+        /* A pEnd past the code point must not change the verdict: the DFA
+         * stops as soon as it can decide. */
+        const unsigned char two[] = { 'a', '.' };
+        check_size(name, "pEnd past code point",
+                   (size_t)utf_is_word(two, two + 2), 1);
+        const unsigned char two2[] = { '.', 'a' };
+        check_size(name, "pEnd past non-word", (size_t)utf_is_word(two2, two2 + 2), 0);
+    }
+}
+
+static void test_classify_connector(void) {
+    const char *name = "classify_connector";
+    static const unsigned int pc[] = {
+        0x005F, 0x203F, 0x2040, 0x2054, 0xFE33, 0xFE34, 0xFE4D, 0xFE4F, 0xFF3F
+    };
+    unsigned char b[4];
+
+    for (size_t i = 0; i < sizeof(pc)/sizeof(*pc); i++) {
+        size_t n = cls_enc(pc[i], b);
+        if (!utf_is_word_connector(b, b + n))
+            test_fail(name, "U+%04X should be a connector", pc[i]);
+        else
+            test_ok(name, "U+%04X is a connector", pc[i]);
+    }
+
+    /* Near misses on each multi-byte prefix. */
+    static const unsigned int notpc[] = {
+        'a', '-', 0x203E, 0x2041, 0x2053, 0x2055, 0xFE32, 0xFE35,
+        0xFE4C, 0xFE50, 0xFF3E, 0xFF40, 0x3002
+    };
+    for (size_t i = 0; i < sizeof(notpc)/sizeof(*notpc); i++) {
+        size_t n = cls_enc(notpc[i], b);
+        if (utf_is_word_connector(b, b + n))
+            test_fail(name, "U+%04X should NOT be a connector", notpc[i]);
+        else
+            test_ok(name, "U+%04X is not a connector", notpc[i]);
+    }
+
+    check_size(name, "NULL", (size_t)utf_is_word_connector(NULL, NULL), 0);
+    /* A truncated 3-byte connector must not match on its lead byte alone. */
+    {
+        const unsigned char trunc[] = { 0xEF, 0xBC };
+        check_size(name, "truncated", (size_t)utf_is_word_connector(trunc, trunc + 2), 0);
+    }
+}
+
+/* Whole-table integrity: exact word-character counts per range.  The set is
+ * verified exhaustively against gen/data/cl_Word.txt offline; these totals
+ * are the committed fingerprint, so any table corruption or accidental
+ * regeneration against a different Unicode version shows up here. */
+static void test_classify_census(void) {
+    const char *name = "classify_census";
+    unsigned char b[4];
+    size_t ascii = 0, latin1 = 0, bmp = 0, smp = 0;
+
+    for (unsigned int cp = 0; cp < 0x110000; cp++) {
+        if (cp >= 0xD800 && cp <= 0xDFFF) continue;
+        size_t n = cls_enc(cp, b);
+        if (!utf_is_word(b, b + n)) continue;
+        if (cp < 0x80) ascii++;
+        if (cp < 0x100) latin1++;
+        if (cp < 0x10000) bmp++; else smp++;
+    }
+
+    check_size(name, "ASCII word chars", ascii, 62);
+    check_size(name, "Latin-1 word chars", latin1, 127);
+    check_size(name, "BMP word chars", bmp, 50786);
+    check_size(name, "supplementary word chars", smp, 93856);
+    check_size(name, "total word chars", bmp + smp, 144642);
+}
+
 /* ================================================================
  * Main
  * ================================================================ */
@@ -4143,6 +4300,9 @@ static const test_suite_t suites[] = {
     { "compress_str",     test_compress_str },
     { "cluster_advance",  test_cluster_advance },
     { "console_width",    test_console_width },
+    { "classify_word",    test_classify_word },
+    { "classify_connector", test_classify_connector },
+    { "classify_census",  test_classify_census },
     { "colorstate_helpers", test_colorstate_helpers },
     { "render_ascii",     test_render_ascii },
     { "render_ansi16",   test_render_ansi16 },

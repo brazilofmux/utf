@@ -21,8 +21,10 @@ LIB_SRCS = src/color_ops.c \
            src/grapheme.c \
            src/nfc.c \
            src/collate.c \
+           src/classify.c \
            tables/unicode_tables.c \
            tables/unicode_tables_ext.c \
+           tables/word_tables.c \
            tables/nfc_tables.c \
            tables/ducet_dfa_tables.c \
            tables/ducet_cetable.c \

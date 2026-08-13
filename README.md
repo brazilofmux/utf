@@ -2,7 +2,7 @@
 
 A grab-and-go Unicode library built on compressed DFAs and Ragel -G2
 state machines.  Processes UTF-8 directly — no conversion to UTF-16
-and back.  No malloc.  No dependencies.  689 KB.
+and back.  No malloc.  No dependencies.  702 KB.
 
 Unicode 16.0.  MIT licensed.
 
@@ -19,6 +19,7 @@ cd utf && make && make test
 | CIE97 | `cie97.h` | Perceptual color distance (sRGB → CIELAB) with Kd-tree nearest-neighbor over xterm-256 palette |
 | Grapheme | `grapheme.h` | Extended Grapheme Cluster segmentation (UAX #29) — emoji ZWJ, regional indicators, Hangul |
 | NFC | `nfc.h` | Canonical normalization (UAX #15) with Hangul algorithmic composition |
+| Classify | `classify.h` | Word-character membership (Alphabetic + Nd + Mn + Mc), connector punctuation |
 | Collation | `collate.h` | DUCET sort (UTS #10) — multi-level comparison, case-insensitive comparison, and binary sort keys |
 | Tables | `utf_tables.h` | Compressed DFA tables for case mapping, character width, GCB, charset approximation |
 
@@ -66,9 +67,9 @@ general-purpose rule-based break engine.
 
 | | Size |
 |---|---|
-| **libutf.a** (stripped) | **689 KB** |
+| **libutf.a** (stripped) | **702 KB** |
 | libicuuc.a + libicui18n.a + libicudata.a | 42,326 KB |
-| **Ratio** | **61x smaller** |
+| **Ratio** | **60x smaller** |
 
 ## Correctness
 
@@ -134,6 +135,7 @@ Link against `libutf.a` and `#include` the headers you need:
 ```c
 #include "utf/color_ops.h"   /* co_toupper, co_render_ansi256, ... */
 #include "utf/nfc.h"         /* utf_nfc_normalize, utf_nfc_is_nfc */
+#include "utf/classify.h"    /* utf_is_word, utf_is_word_connector */
 #include "utf/collate.h"     /* utf_collate_cmp, utf_collate_cmp_ci, utf_collate_sortkey */
 #include "utf/grapheme.h"    /* utf_grapheme_next, utf_grapheme_count */
 #include "utf/cie97.h"       /* co_nearest_xterm256, co_nearest_xterm16 */
@@ -166,9 +168,9 @@ Unicode version.  See [`gen/README.md`](gen/README.md).
 
 ```
 include/utf/       Public C headers
-src/               Implementation (color_ops.rl, cie97.c, nfc.c, collate.c, grapheme.c)
+src/               Implementation (color_ops.rl, cie97.c, nfc.c, collate.c, grapheme.c, classify.c)
 tables/            Pre-generated compressed DFA tables (ready to compile)
-tests/             416-test suite
+tests/             483-test suite
 examples/          Example programs (sort, color lookup, NFC check, ANSI rendering)
 bench/             Benchmarks vs ICU
 gen/               Code generation pipeline (C++ tools + Perl + Unicode data)

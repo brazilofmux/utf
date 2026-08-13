@@ -9,7 +9,7 @@ It is also 42 megabytes.
 I spent the last sixteen years building a different kind of Unicode
 library—one designed around compressed deterministic finite automata
 that consume UTF-8 bytes directly. No UTF-16 conversion. No malloc.
-No dependencies. The whole thing compiles to a 689 KB static archive.
+No dependencies. The whole thing compiles to a 702 KB static archive.
 
 As of this week, it beats ICU on every UTF-8 benchmark I can throw
 at it.
@@ -51,9 +51,9 @@ But the gap has narrowed from 2.1x to 1.4x.
 
 | | Size |
 |---|---|
-| **libutf.a** (stripped) | **689 KB** |
+| **libutf.a** (stripped) | **702 KB** |
 | libicuuc.a + libicui18n.a + libicudata.a | 42,326 KB |
-| **Ratio** | **61x smaller** |
+| **Ratio** | **60x smaller** |
 
 ## Why UTF-8 input matters
 
@@ -311,5 +311,5 @@ git clone https://github.com/brazilofmux/utf.git
 cd utf && make && make test
 ```
 
-Unicode 16.0. Zero malloc. 689 KB. Faster than ICU on every
+Unicode 16.0. Zero malloc. 702 KB. Faster than ICU on every
 UTF-8 operation.
