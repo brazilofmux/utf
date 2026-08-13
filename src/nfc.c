@@ -32,15 +32,22 @@
 
 #define UTF8_CONTINUE 5
 
+/* NFC_QC property values (see gen/gen_nfcqc.pl). */
+#define NFCQC_YES   0
+#define NFCQC_NO    1
+#define NFCQC_MAYBE 2
+
 /* Maximum *decomposed* code points per normalization segment.
  *
- * A segment is one combining character sequence (starter + combiners).
- * It is a hard limit rather than a hint: input that exceeds it is reported
- * as UTF_NFC_SEGMENT_TOO_LONG and is never silently discarded.
- * Override with -DUTF_NFC_SEG_MAX=N.
+ * A segment is one combining character sequence: a starter plus every
+ * following code point up to the next canonical boundary.  UAX #15's
+ * Stream-Safe Text Format caps a sequence at 30 non-starters, so this is
+ * ~34x real-world worst case.  It is a hard limit rather than a hint:
+ * input that exceeds it is reported as UTF_NFC_SEGMENT_TOO_LONG and is
+ * never silently discarded.  Override with -DUTF_NFC_SEG_MAX=N.
  */
 #ifndef UTF_NFC_SEG_MAX
-#define UTF_NFC_SEG_MAX 128
+#define UTF_NFC_SEG_MAX 1024
 #endif
 #define NFC_SEG_MAX UTF_NFC_SEG_MAX
 
@@ -338,6 +345,67 @@ static int DecomposeOne(uint32_t cp, NFCCodePoint *buf, int *n, int maxN)
     return 1;
 }
 
+/*
+ * HasBoundaryBefore — is it safe to start a new normalization segment here?
+ *
+ * Normalizing [A, C) and [C, B) separately equals normalizing [A, B) only if
+ * nothing at or after C can interact with anything before it.  Three
+ * conditions, each of which is load-bearing:
+ *
+ *   1. ccc == 0.  A non-starter reorders with the marks preceding it.
+ *
+ *   2. NFC_QC != Maybe.  UAX #15 assigns Maybe to exactly the code points
+ *      that may compose with a preceding character, so every possible
+ *      second element of a primary composite is Maybe — verified against
+ *      Unicode 16.0: the 120 composition seconds (Hangul V/T jamo plus 71
+ *      pairs across 17 other scripts) are a subset of the 132 Maybe code
+ *      points.  QC=No is a different thing entirely: an exclusion or
+ *      singleton such as U+0958 or U+212B is rewritten in place and cannot
+ *      compose leftward, so a boundary before it IS safe.  Requiring
+ *      QC=Yes here (rather than merely "not Maybe") was the bug behind
+ *      issue #1: runs of exclusions never ended a segment, so 2700 of them
+ *      became one segment and everything past the buffer cap was dropped.
+ *
+ *   3. Its own decomposition begins with a starter.  U+0F73, U+0F75 and
+ *      U+0F81 are QC=No starters that decompose to U+0F71 (ccc=129) first;
+ *      splitting before one would leave that mark unable to reorder with
+ *      the preceding sequence.  Those three are the entire exception set in
+ *      Unicode 16.0, and QC=Yes starters never decompose to a non-starter,
+ *      so this lookup only runs for QC=No.
+ */
+static int HasBoundaryBefore(const unsigned char *p, int nBytes, int ccc, int qc)
+{
+    if (0 != ccc || NFCQC_MAYBE == qc) return 0;
+    if (NFCQC_NO != qc) return 1;
+
+    int bXor;
+    const co_string_desc *sd = GetNFD(p, &bXor);
+    if (NULL == sd) return 1;
+
+    /* Only the decomposition's first code point matters, so materialize at
+     * most 4 bytes.  XOR entries are deltas against the source code point's
+     * own bytes, which is why the copy is bounded by nBytes as well. */
+    unsigned char decomposed[4];
+    size_t nDecomp = sd->n_bytes;
+    if (nDecomp > sizeof(decomposed)) nDecomp = sizeof(decomposed);
+    if (bXor) {
+        if (nDecomp > (size_t)nBytes) nDecomp = (size_t)nBytes;
+        for (size_t i = 0; i < nDecomp; i++)
+            decomposed[i] = p[i] ^ sd->p[i];
+    } else {
+        memcpy(decomposed, sd->p, nDecomp);
+    }
+
+    const unsigned char *dp = decomposed;
+    const unsigned char *dpEnd = decomposed + nDecomp;
+    uint32_t first = utf8_Decode(&dp, dpEnd);
+    if (UNI_EOF == first) return 1;
+
+    unsigned char enc[4];
+    int nb = utf8_Encode(first, enc);
+    return (nb > 0) ? (0 == GetCCC(enc, enc + nb)) : 1;
+}
+
 /* Canonical ordering: stable insertion sort by CCC. */
 static void CanonicalOrder(NFCCodePoint *buf, int n)
 {
@@ -571,16 +639,17 @@ utf_nfc_status utf_nfc_normalize(const unsigned char *src, size_t nSrc,
         /* Skip past the problem code point. */
         p += n;
 
-        /* Scan forward to find the end of the dirty segment:
-         * the next starter (CCC=0) with NFC_QC=Yes.
-         */
+        /* Scan forward for the end of the dirty segment: the next code
+         * point with a canonical boundary before it (see
+         * HasBoundaryBefore).  Requiring NFC_QC=Yes here instead let runs
+         * of composition exclusions and singletons grow without bound. */
         while (p < pEnd) {
             if (*p < 0x80) break;  /* ASCII: starter, QC=Yes, never a comp second */
             int n2 = utf8_cplen(p, pEnd);
             if (0 == n2) { p++; continue; }
             int ccc2, qc2;
             GetCCCandNFCQC(p, p + n2, &ccc2, &qc2);
-            if (0 == ccc2 && 0 == qc2) break;  /* Clean starter: end of dirty segment */
+            if (HasBoundaryBefore(p, n2, ccc2, qc2)) break;
             p += n2;
         }
 
