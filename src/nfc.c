@@ -32,11 +32,17 @@
 
 #define UTF8_CONTINUE 5
 
-/* Maximum code points per normalization segment.
+/* Maximum *decomposed* code points per normalization segment.
+ *
  * A segment is one combining character sequence (starter + combiners).
- * 128 is generous — real sequences rarely exceed ~10 code points.
+ * It is a hard limit rather than a hint: input that exceeds it is reported
+ * as UTF_NFC_SEGMENT_TOO_LONG and is never silently discarded.
+ * Override with -DUTF_NFC_SEG_MAX=N.
  */
-#define NFC_SEG_MAX 128
+#ifndef UTF_NFC_SEG_MAX
+#define UTF_NFC_SEG_MAX 128
+#endif
+#define NFC_SEG_MAX UTF_NFC_SEG_MAX
 
 typedef struct {
     uint32_t cp;
@@ -267,7 +273,10 @@ static uint32_t Compose(uint32_t cp1, uint32_t cp2)
 
 /* --- Decomposition --- */
 
-static void DecomposeOne(uint32_t cp, NFCCodePoint *buf, int *n, int maxN)
+/* Decompose one code point into buf.  Returns 0 if buf is too small — the
+ * caller must treat that as an error, never as a truncated result.
+ */
+static int DecomposeOne(uint32_t cp, NFCCodePoint *buf, int *n, int maxN)
 {
     /* Hangul syllable decomposition. */
     if (HANGUL_SBASE <= cp && cp < HANGUL_SBASE + HANGUL_SCOUNT) {
@@ -275,28 +284,29 @@ static void DecomposeOne(uint32_t cp, NFCCodePoint *buf, int *n, int maxN)
         uint32_t l = HANGUL_LBASE + sIndex / HANGUL_NCOUNT;
         uint32_t v = HANGUL_VBASE + (sIndex % HANGUL_NCOUNT) / HANGUL_TCOUNT;
         uint32_t t = HANGUL_TBASE + sIndex % HANGUL_TCOUNT;
+        int need = (t != HANGUL_TBASE) ? 3 : 2;
 
-        if (*n < maxN) { buf[*n].cp = l; buf[*n].ccc = 0; (*n)++; }
-        if (*n < maxN) { buf[*n].cp = v; buf[*n].ccc = 0; (*n)++; }
-        if (t != HANGUL_TBASE && *n < maxN) { buf[*n].cp = t; buf[*n].ccc = 0; (*n)++; }
-        return;
+        if (*n + need > maxN) return 0;
+        buf[*n].cp = l; buf[*n].ccc = 0; (*n)++;
+        buf[*n].cp = v; buf[*n].ccc = 0; (*n)++;
+        if (t != HANGUL_TBASE) { buf[*n].cp = t; buf[*n].ccc = 0; (*n)++; }
+        return 1;
     }
 
     /* Table lookup. */
     unsigned char encoded[4];
     int nBytes = utf8_Encode(cp, encoded);
-    if (nBytes <= 0) return;
+    if (nBytes <= 0) return 1;
 
     int bXor;
     const co_string_desc *sd = GetNFD(encoded, &bXor);
     if (NULL == sd) {
         /* No decomposition — emit as-is. */
-        if (*n < maxN) {
-            buf[*n].cp = cp;
-            buf[*n].ccc = GetCCC(encoded, encoded + nBytes);
-            (*n)++;
-        }
-        return;
+        if (*n >= maxN) return 0;
+        buf[*n].cp = cp;
+        buf[*n].ccc = GetCCC(encoded, encoded + nBytes);
+        (*n)++;
+        return 1;
     }
 
     /* Build decomposed UTF-8. */
@@ -314,9 +324,10 @@ static void DecomposeOne(uint32_t cp, NFCCodePoint *buf, int *n, int maxN)
     /* Parse decomposed UTF-8 into code points. */
     const unsigned char *dp = decomposed;
     const unsigned char *dpEnd = decomposed + nDecomp;
-    while (dp < dpEnd && *n < maxN) {
+    while (dp < dpEnd) {
         uint32_t dcp = utf8_Decode(&dp, dpEnd);
         if (UNI_EOF == dcp) break;
+        if (*n >= maxN) return 0;
 
         unsigned char enc3[4];
         int nb3 = utf8_Encode(dcp, enc3);
@@ -324,6 +335,7 @@ static void DecomposeOne(uint32_t cp, NFCCodePoint *buf, int *n, int maxN)
         buf[*n].ccc = (nb3 > 0) ? GetCCC(enc3, enc3 + nb3) : 0;
         (*n)++;
     }
+    return 1;
 }
 
 /* Canonical ordering: stable insertion sort by CCC. */
@@ -411,35 +423,52 @@ static int utf8_cplen(const unsigned char *p, const unsigned char *pEnd)
 /* --- Segment normalizer --- */
 
 /* Normalize a single combining character sequence into dst.
- * Returns bytes written.
+ *
+ * Returns UTF_NFC_OK and sets *pnOut, or an error status.  On error nothing
+ * is written and *pnOut is 0: a partially normalized segment is not a valid
+ * prefix of the answer, so it must never be emitted.
  */
-static size_t NormalizeSegment(const unsigned char *src, size_t nSrc,
-                               unsigned char *dst, size_t nDstMax)
+static int NormalizeSegment(const unsigned char *src, size_t nSrc,
+                            unsigned char *dst, size_t nDstMax, size_t *pnOut)
 {
     NFCCodePoint cps[NFC_SEG_MAX];
     int nCps = 0;
 
+    *pnOut = 0;
+
     const unsigned char *p = src;
     const unsigned char *pEnd = src + nSrc;
-    while (p < pEnd && nCps < NFC_SEG_MAX) {
+    while (p < pEnd) {
         uint32_t cp = utf8_Decode(&p, pEnd);
         if (UNI_EOF == cp) continue;
-        DecomposeOne(cp, cps, &nCps, NFC_SEG_MAX);
+        if (!DecomposeOne(cp, cps, &nCps, NFC_SEG_MAX))
+            return UTF_NFC_SEGMENT_TOO_LONG;
     }
 
     CanonicalOrder(cps, nCps);
     CanonicalCompose(cps, &nCps);
 
+    /* Measure before writing so a short dst truncates at a segment boundary
+     * rather than mid-sequence. */
+    size_t need = 0;
+    for (int i = 0; i < nCps; i++) {
+        unsigned char enc[4];
+        int nb = utf8_Encode(cps[i].cp, enc);
+        if (nb > 0) need += (size_t)nb;
+    }
+    if (need > nDstMax) return UTF_NFC_TRUNCATED;
+
     size_t nOut = 0;
     for (int i = 0; i < nCps; i++) {
         unsigned char enc[4];
         int nb = utf8_Encode(cps[i].cp, enc);
-        if (nb > 0 && nOut + (size_t)nb <= nDstMax) {
+        if (nb > 0) {
             memcpy(dst + nOut, enc, nb);
-            nOut += nb;
+            nOut += (size_t)nb;
         }
     }
-    return nOut;
+    *pnOut = nOut;
+    return UTF_NFC_OK;
 }
 
 /* --- Public API --- */
@@ -472,8 +501,26 @@ int utf_nfc_is_nfc(const unsigned char *src, size_t nSrc)
     return 1;
 }
 
-void utf_nfc_normalize(const unsigned char *src, size_t nSrc,
-                       unsigned char *dst, size_t nDstMax, size_t *pnDst)
+/* Append to dst, or report truncation.  Never writes a partial copy: a
+ * short buffer stops output at the last whole unit rather than splitting a
+ * UTF-8 sequence. */
+static int Emit(unsigned char *dst, size_t nDstMax, size_t *pnOut,
+                const unsigned char *p, size_t n)
+{
+    if (n > nDstMax - *pnOut) return UTF_NFC_TRUNCATED;
+    memcpy(dst + *pnOut, p, n);
+    *pnOut += n;
+    return UTF_NFC_OK;
+}
+
+size_t utf_nfc_normalize_bound(size_t nSrc)
+{
+    return 3 * nSrc;
+}
+
+utf_nfc_status utf_nfc_normalize(const unsigned char *src, size_t nSrc,
+                                 unsigned char *dst, size_t nDstMax,
+                                 size_t *pnDst)
 {
     *pnDst = 0;
     const unsigned char *p = src;
@@ -516,9 +563,9 @@ void utf_nfc_normalize(const unsigned char *src, size_t nSrc,
 
         /* Copy clean prefix [copyFrom, lastStarter) to output. */
         size_t cleanLen = (size_t)(lastStarter - copyFrom);
-        if (cleanLen > 0 && nOut + cleanLen <= nDstMax) {
-            memcpy(dst + nOut, copyFrom, cleanLen);
-            nOut += cleanLen;
+        if (cleanLen > 0) {
+            int rc = Emit(dst, nDstMax, &nOut, copyFrom, cleanLen);
+            if (UTF_NFC_OK != rc) { *pnDst = nOut; return rc; }
         }
 
         /* Skip past the problem code point. */
@@ -528,7 +575,7 @@ void utf_nfc_normalize(const unsigned char *src, size_t nSrc,
          * the next starter (CCC=0) with NFC_QC=Yes.
          */
         while (p < pEnd) {
-            if (*p < 0x80) break;  /* ASCII = clean starter */
+            if (*p < 0x80) break;  /* ASCII: starter, QC=Yes, never a comp second */
             int n2 = utf8_cplen(p, pEnd);
             if (0 == n2) { p++; continue; }
             int ccc2, qc2;
@@ -539,9 +586,11 @@ void utf_nfc_normalize(const unsigned char *src, size_t nSrc,
 
         /* Normalize [lastStarter, p). */
         size_t segLen = (size_t)(p - lastStarter);
-        nOut += NormalizeSegment(lastStarter, segLen,
-                                dst + nOut,
-                                (nOut < nDstMax) ? nDstMax - nOut : 0);
+        size_t segOut = 0;
+        int rc = NormalizeSegment(lastStarter, segLen,
+                                  dst + nOut, nDstMax - nOut, &segOut);
+        if (UTF_NFC_OK != rc) { *pnDst = nOut; return rc; }
+        nOut += segOut;
 
         copyFrom = p;
         lastStarter = p;
@@ -550,10 +599,11 @@ void utf_nfc_normalize(const unsigned char *src, size_t nSrc,
 
     /* Copy remaining clean tail. */
     size_t tailLen = (size_t)(pEnd - copyFrom);
-    if (tailLen > 0 && nOut + tailLen <= nDstMax) {
-        memcpy(dst + nOut, copyFrom, tailLen);
-        nOut += tailLen;
+    if (tailLen > 0) {
+        int rc = Emit(dst, nDstMax, &nOut, copyFrom, tailLen);
+        if (UTF_NFC_OK != rc) { *pnDst = nOut; return rc; }
     }
 
     *pnDst = nOut;
+    return UTF_NFC_OK;
 }
