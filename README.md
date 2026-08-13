@@ -170,7 +170,7 @@ Unicode version.  See [`gen/README.md`](gen/README.md).
 include/utf/       Public C headers
 src/               Implementation (color_ops.rl, cie97.c, nfc.c, collate.c, grapheme.c, classify.c)
 tables/            Pre-generated compressed DFA tables (ready to compile)
-tests/             483-test suite
+tests/             499-test suite
 examples/          Example programs (sort, color lookup, NFC check, ANSI rendering)
 bench/             Benchmarks vs ICU
 gen/               Code generation pipeline (C++ tools + Perl + Unicode data)

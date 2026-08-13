@@ -13,6 +13,10 @@
 
 #include "utf/color_ops.h"
 #include "utf/classify.h"
+#include "utf/grapheme.h"
+#include "utf/nfc.h"
+#include "utf/collate.h"
+#include "utf/utf_tables.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -668,8 +672,6 @@ static void test_reverse(void) {
 /* ---- co_search / co_pos ---- */
 
 static void test_search_pos(void) {
-    unsigned char out[UTF_BUFSIZE];
-
     /* co_search: basic. */
     const unsigned char *haystack = (const unsigned char *)"hello world";
     const unsigned char *result = co_search(haystack, 11,
@@ -2686,9 +2688,13 @@ static void test_navigation(void) {
         test_fail(name, "skip_color: off by %td", p - buf);
     }
 
-    /* co_skip_color: no color at start. */
-    p = co_skip_color((const unsigned char *)"ABC", (const unsigned char *)"ABC" + 3);
-    if (p == (const unsigned char *)"ABC") {
+    /* co_skip_color: no color at start.  Compare against a named object,
+     * not a second "ABC" literal: whether identical literals share storage
+     * is unspecified, so that comparison was passing by the grace of the
+     * compiler's string pooling rather than because the call was correct. */
+    static const unsigned char abc[] = "ABC";
+    p = co_skip_color(abc, abc + 3);
+    if (p == abc) {
         test_ok(name, "skip_color no color");
     } else {
         test_fail(name, "skip_color advanced when no color");
@@ -4236,6 +4242,234 @@ static void test_classify_census(void) {
 }
 
 /* ================================================================
+ * Table fingerprints
+ *
+ * Three separate incidents have come from generated tables and the code
+ * that reads them drifting apart, each silent and each corrupting results
+ * rather than failing:
+ *
+ *   - a tr_gcb table committed from a corrupted intermediate file, which
+ *     misclassified 115,546 code points;
+ *   - readers that consumed every byte instead of stopping at the first
+ *     accepting state, which the table builder's pruning requires;
+ *   - the GCB dimensions duplicated in color_ops.rl drifting from the
+ *     real table.
+ *
+ * The third is already a hard compile error: color_ops.rl redeclares the
+ * arrays AFTER including utf_tables.h, so a mismatched dimension is a
+ * conflicting declaration.  (Do not "clean up" that redundancy — it is
+ * load-bearing.)  The other two are what this section covers.
+ *
+ * Three layers, because each catches something the others cannot:
+ *
+ *   1. Static assertions on the sot dimension vs ACCEPTING_STATES_START.
+ *      Catches a regenerated table whose array size and state constant are
+ *      updated inconsistently.  Compile time, zero cost.
+ *   2. Content fingerprints over the raw table data.  Catches any change to
+ *      the tables — including tr_foldmatch, tr_cp437, tr_latin1 and
+ *      tr_latin2, which are exported but which nothing in the library
+ *      reads, so no behavioural test can reach them.
+ *   3. Behavioural fingerprints, sweeping every code point through the
+ *      PUBLIC API.  Catches reader logic drift as well as data drift — a
+ *      correct table read incorrectly still fails here.
+ *
+ * The expected values are a fingerprint of the current, verified state, so
+ * layers 2 and 3 are change detectors rather than proofs of correctness.
+ * What they guarantee is that a table or reader cannot change without
+ * somebody deciding that the change was intended.  Correctness itself is
+ * established elsewhere: utf_is_word against its generating set over all
+ * code points, and NFC and collation against ICU in tests/test_*_icu.c.
+ * ================================================================ */
+
+/* --- 1. Structural invariant: sot has exactly ACCEPTING_STATES_START entries --- */
+
+#define FP_DIM(arr) (sizeof(arr) / sizeof((arr)[0]))
+#define FP_ASSERT_STATES(tbl, CONST_) \
+    _Static_assert(FP_DIM(tbl##_sot) == CONST_, \
+                   #tbl "_sot dimension must equal " #CONST_)
+
+FP_ASSERT_STATES(tr_tolower,        TR_TOLOWER_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_toupper,        TR_TOUPPER_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_totitle,        TR_TOTITLE_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_foldmatch,      TR_FOLDMATCH_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_widths,         TR_WIDTHS_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_gcb,            TR_GCB_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(cl_extpict,        CL_EXTPICT_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(cl_word,           CL_WORD_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_ccc_nfcqc,      TR_CCC_NFCQC_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_nfd,            TR_NFD_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_nfc_compose,    TR_NFC_COMPOSE_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_ducet,          TR_DUCET_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_ducet_contract, TR_DUCET_CONTRACT_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_ascii,          TR_ASCII_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_cp437,          TR_CP437_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_latin1,         TR_LATIN1_ACCEPTING_STATES_START);
+FP_ASSERT_STATES(tr_latin2,         TR_LATIN2_ACCEPTING_STATES_START);
+
+/* --- FNV-1a, serialized little-endian so the constants are portable --- */
+
+#define FP_INIT 1469598103934665603ULL
+
+static uint64_t fp_byte(uint64_t h, unsigned char b) {
+    h ^= (uint64_t)b;
+    h *= 1099511628211ULL;
+    return h;
+}
+
+static uint64_t fp_u16(uint64_t h, unsigned int v) {
+    h = fp_byte(h, (unsigned char)(v & 0xFF));
+    return fp_byte(h, (unsigned char)((v >> 8) & 0xFF));
+}
+
+/* Hash an array by VALUE, not by memory image: element width is taken from
+ * the declaration, so the result does not depend on host endianness. */
+static uint64_t fp_arr(uint64_t h, const void *base, size_t total, size_t elemsz) {
+    size_t n = total / elemsz;
+    for (size_t i = 0; i < n; i++) {
+        unsigned int v = (1 == elemsz) ? ((const unsigned char *)base)[i]
+                                       : ((const unsigned short *)base)[i];
+        h = fp_u16(h, v);
+    }
+    return h;
+}
+
+#define FP_ARR(h, a) ((h) = fp_arr((h), (a), sizeof(a), sizeof((a)[0])))
+
+/* Replacement-string tables hold pointers; hash what they point AT. */
+static uint64_t fp_ott(uint64_t h, const co_string_desc *o, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        h = fp_u16(h, (unsigned int)o[i].n_bytes);
+        h = fp_u16(h, (unsigned int)o[i].n_points);
+        for (size_t j = 0; j < o[i].n_bytes; j++) h = fp_byte(h, o[i].p[j]);
+    }
+    return h;
+}
+
+#define FP_OTT(h, a) ((h) = fp_ott((h), (a), FP_DIM(a)))
+
+static void fp_check(const char *name, const char *label,
+                     uint64_t got, uint64_t expect) {
+    if (got != expect) {
+        test_fail(name, "%s fingerprint 0x%016llX, expected 0x%016llX",
+                  label, (unsigned long long)got, (unsigned long long)expect);
+    } else {
+        test_ok(name, "%s 0x%016llX", label, (unsigned long long)got);
+    }
+}
+
+/* --- 2. Content fingerprints --- */
+
+static void test_table_content(void) {
+    const char *name = "table_content";
+    uint64_t h;
+
+    h = FP_INIT;
+    FP_ARR(h, tr_tolower_itt); FP_ARR(h, tr_tolower_sot); FP_ARR(h, tr_tolower_sbt);
+    FP_OTT(h, tr_tolower_ott);
+    FP_ARR(h, tr_toupper_itt); FP_ARR(h, tr_toupper_sot); FP_ARR(h, tr_toupper_sbt);
+    FP_OTT(h, tr_toupper_ott);
+    FP_ARR(h, tr_totitle_itt); FP_ARR(h, tr_totitle_sot); FP_ARR(h, tr_totitle_sbt);
+    FP_OTT(h, tr_totitle_ott);
+    fp_check(name, "case mapping", h, 0xB831663A46AB8BF0ULL);
+
+    h = FP_INIT;
+    FP_ARR(h, tr_foldmatch_itt); FP_ARR(h, tr_foldmatch_sot);
+    FP_ARR(h, tr_foldmatch_sbt); FP_OTT(h, tr_foldmatch_ott);
+    fp_check(name, "foldmatch (no reader)", h, 0x579D359D3C1ECE35ULL);
+
+    h = FP_INIT;
+    FP_ARR(h, tr_widths_itt); FP_ARR(h, tr_widths_sot); FP_ARR(h, tr_widths_sbt);
+    fp_check(name, "widths", h, 0xC626B66B55E7F2EFULL);
+
+    h = FP_INIT;
+    FP_ARR(h, tr_gcb_itt); FP_ARR(h, tr_gcb_sot); FP_ARR(h, tr_gcb_sbt);
+    FP_ARR(h, cl_extpict_itt); FP_ARR(h, cl_extpict_sot); FP_ARR(h, cl_extpict_sbt);
+    fp_check(name, "gcb + extpict", h, 0x5F58F1BF1505BAC2ULL);
+
+    h = FP_INIT;
+    FP_ARR(h, cl_word_itt); FP_ARR(h, cl_word_sot); FP_ARR(h, cl_word_sbt);
+    fp_check(name, "word", h, 0x2F2289ACBE1A2ADFULL);
+
+    h = FP_INIT;
+    FP_ARR(h, tr_ccc_nfcqc_itt); FP_ARR(h, tr_ccc_nfcqc_sot); FP_ARR(h, tr_ccc_nfcqc_sbt);
+    FP_ARR(h, tr_nfd_itt); FP_ARR(h, tr_nfd_sot); FP_ARR(h, tr_nfd_sbt);
+    FP_OTT(h, tr_nfd_ott);
+    FP_ARR(h, tr_nfc_compose_itt); FP_ARR(h, tr_nfc_compose_sot);
+    FP_ARR(h, tr_nfc_compose_sbt);
+    fp_check(name, "nfc", h, 0xE2956B0F32521D0DULL);
+
+    h = FP_INIT;
+    FP_ARR(h, tr_ducet_itt); FP_ARR(h, tr_ducet_sot); FP_ARR(h, tr_ducet_sbt);
+    FP_ARR(h, tr_ducet_contract_itt); FP_ARR(h, tr_ducet_contract_sot);
+    FP_ARR(h, tr_ducet_contract_sbt);
+    fp_check(name, "ducet", h, 0x5377CC4C03D5F528ULL);
+
+    h = FP_INIT;
+    FP_ARR(h, tr_ascii_itt); FP_ARR(h, tr_ascii_sot); FP_ARR(h, tr_ascii_sbt);
+    FP_ARR(h, tr_cp437_itt); FP_ARR(h, tr_cp437_sot); FP_ARR(h, tr_cp437_sbt);
+    FP_ARR(h, tr_latin1_itt); FP_ARR(h, tr_latin1_sot); FP_ARR(h, tr_latin1_sbt);
+    FP_ARR(h, tr_latin2_itt); FP_ARR(h, tr_latin2_sot); FP_ARR(h, tr_latin2_sbt);
+    fp_check(name, "charset (3 of 4 have no reader)", h, 0xEB24D6B18C6FDE34ULL);
+}
+
+/* --- 3. Behavioural fingerprints: every code point through the public API --- */
+
+static void test_table_behaviour(void) {
+    const char *name = "table_behaviour";
+    unsigned char b[8], out[UTF_BUFSIZE], key[256];
+    uint64_t hWidth = FP_INIT, hWord = FP_INIT, hAscii = FP_INIT;
+    uint64_t hQc = FP_INIT, hNfc = FP_INIT, hGcb = FP_INIT;
+    uint64_t hCase = FP_INIT, hSort = FP_INIT;
+
+    for (unsigned int cp = 0; cp < 0x110000; cp++) {
+        if (cp >= 0xD800 && cp <= 0xDFFF) continue;
+        size_t n = cls_enc(cp, b);
+        b[n] = 0;
+
+        hWidth = fp_u16(hWidth, (unsigned int)(co_console_width(b) & 0xFFFF));
+        hWord  = fp_byte(hWord, (unsigned char)utf_is_word(b, b + n));
+        hAscii = fp_byte(hAscii, co_dfa_ascii(b));
+        hQc    = fp_byte(hQc, (unsigned char)utf_nfc_is_nfc(b, n));
+
+        /* NFD + composition: normalize the code point on its own. */
+        size_t nOut = 0;
+        utf_nfc_normalize(b, n, out, sizeof(out), &nOut);
+        hNfc = fp_u16(hNfc, (unsigned int)nOut);
+        for (size_t i = 0; i < nOut; i++) hNfc = fp_byte(hNfc, out[i]);
+
+        /* GCB: does this code point join a preceding 'a', or break from it?
+         * A single code point is always one cluster, so the class is only
+         * observable in a pair. */
+        unsigned char pair[8];
+        pair[0] = 'a';
+        memcpy(pair + 1, b, n);
+        hGcb = fp_u16(hGcb, (unsigned int)utf_grapheme_next(pair, n + 1));
+
+        /* Case mapping exercises both the DFA and its replacement strings. */
+        size_t nUp = co_toupper(out, b, n);
+        hCase = fp_u16(hCase, (unsigned int)nUp);
+        for (size_t i = 0; i < nUp; i++) hCase = fp_byte(hCase, out[i]);
+        size_t nLo = co_tolower(out, b, n);
+        hCase = fp_u16(hCase, (unsigned int)nLo);
+        for (size_t i = 0; i < nLo; i++) hCase = fp_byte(hCase, out[i]);
+
+        /* DUCET weights, via the binary sort key. */
+        size_t nKey = utf_collate_sortkey(b, n, key, sizeof(key));
+        hSort = fp_u16(hSort, (unsigned int)nKey);
+        for (size_t i = 0; i < nKey; i++) hSort = fp_byte(hSort, key[i]);
+    }
+
+    fp_check(name, "co_console_width",   hWidth, 0x4ED45F1FEC499D33ULL);
+    fp_check(name, "utf_is_word",        hWord,  0xCADA278567B3B097ULL);
+    fp_check(name, "co_dfa_ascii",       hAscii, 0xA645B63EE3E0B458ULL);
+    fp_check(name, "utf_nfc_is_nfc",     hQc,    0x8D8FE23AAB41B4FDULL);
+    fp_check(name, "utf_nfc_normalize",  hNfc,   0x3B6F3EC69D5DE065ULL);
+    fp_check(name, "utf_grapheme_next",  hGcb,   0x06A84818CDBA25A8ULL);
+    fp_check(name, "co_toupper/tolower", hCase,  0x313DB50F84EBAC7AULL);
+    fp_check(name, "utf_collate_sortkey", hSort, 0xEE4F171E0B703A28ULL);
+}
+
+/* ================================================================
  * Main
  * ================================================================ */
 
@@ -4303,6 +4537,8 @@ static const test_suite_t suites[] = {
     { "classify_word",    test_classify_word },
     { "classify_connector", test_classify_connector },
     { "classify_census",  test_classify_census },
+    { "table_content",    test_table_content },
+    { "table_behaviour",  test_table_behaviour },
     { "colorstate_helpers", test_colorstate_helpers },
     { "render_ascii",     test_render_ascii },
     { "render_ansi16",   test_render_ansi16 },
