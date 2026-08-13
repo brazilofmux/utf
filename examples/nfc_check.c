@@ -28,9 +28,27 @@ int main(void)
     printf("NFC:    %s\n", isNfc ? "yes" : "no");
 
     if (!isNfc) {
+        /* NFC can expand: sizing at utf_nfc_normalize_bound() rules out
+         * truncation.  The status is still checked — a segment limit is
+         * reported the same way, and a short result is otherwise
+         * indistinguishable from text that legitimately composed smaller. */
         unsigned char output[8192];
         size_t nOutput;
-        utf_nfc_normalize(input, nInput, output, sizeof(output), &nOutput);
+
+        if (utf_nfc_normalize_bound(nInput) > sizeof(output) - 1) {
+            fprintf(stderr, "input too large to normalize safely\n");
+            return 1;
+        }
+
+        utf_nfc_status rc = utf_nfc_normalize(input, nInput,
+                                              output, sizeof(output) - 1,
+                                              &nOutput);
+        if (UTF_NFC_OK != rc) {
+            fprintf(stderr, "normalize failed (%s); output would be truncated\n",
+                    UTF_NFC_TRUNCATED == rc ? "buffer too small"
+                                            : "combining sequence too long");
+            return 1;
+        }
         output[nOutput] = 0;
 
         printf("Normal: %zu bytes: ", nOutput);
