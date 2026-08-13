@@ -97,6 +97,19 @@ extern UTF_API const unsigned char  cl_extpict_itt[256];
 extern UTF_API const unsigned short cl_extpict_sot[44];
 extern UTF_API const unsigned char  cl_extpict_sbt[510];
 
+/* ---- Word character classification DFA ----
+ *
+ * Membership in Alphabetic + Nd + Mn + Mc (see gen/gen_word.pl).  The SBT
+ * is unsigned short here rather than unsigned char: 315 states do not fit
+ * in a byte.
+ */
+
+#define CL_WORD_START_STATE (0)
+#define CL_WORD_ACCEPTING_STATES_START (315)
+extern UTF_API const unsigned char  cl_word_itt[256];
+extern UTF_API const unsigned short cl_word_sot[315];
+extern UTF_API const unsigned short cl_word_sbt[4685];
+
 /* ---- NFC normalization DFAs ---- */
 
 /* tr_ccc_nfcqc: Combined CCC + NFC_QC in one DFA.

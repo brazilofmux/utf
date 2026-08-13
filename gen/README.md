@@ -53,6 +53,7 @@ All tools share `smutil.cpp/h` (state machine compression library) and
 | gen_ducet.pl | allkeys.txt, DerivedNormalizationProps.txt | data/tr_ducet.txt, data/tr_ducet_contract.txt, ducet_cetable.h |
 | gen_extpict.pl | emoji-data.txt | data/cl_ExtPict.txt |
 | gen_gcb.pl | GraphemeBreakProperty.txt | data/tr_gcb.txt |
+| gen_word.pl | DerivedCoreProperties.txt, UnicodeData.txt | data/cl_Word.txt |
 | gen_nfcqc.pl | DerivedNormalizationProps.txt | data/tr_nfcqc.txt |
 | gen_nfd.pl | UnicodeData.txt | data/tr_nfd.txt |
 
@@ -65,6 +66,7 @@ Downloaded from https://www.unicode.org/Public/16.0.0/ucd/:
 - `DerivedNormalizationProps.txt` — Normalization properties
 - `EastAsianWidth.txt` — East Asian Width
 - `GraphemeBreakProperty.txt` — Grapheme cluster break
+- `DerivedCoreProperties.txt` — Alphabetic (for the word-character set)
 - `CompositionExclusions.txt` — NFC composition exclusions
 - `emoji-data.txt` — Extended pictographic property
 - `SpecialCasing.txt` — Special case mappings

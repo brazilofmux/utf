@@ -81,12 +81,15 @@ tr_gcb.txt: gen_gcb.pl GraphemeBreakProperty.txt
 cl_ExtPict.txt: gen_extpict.pl emoji-data.txt
 	perl gen_extpict.pl > cl_ExtPict.txt
 
+cl_Word.txt: gen_word.pl DerivedCoreProperties.txt UnicodeData.txt
+	perl gen_word.pl > cl_Word.txt
+
 tr_ducet.txt tr_ducet_contract.txt ../mux/src/ducet_cetable.h: gen_ducet.pl allkeys.txt
 	perl gen_ducet.pl
 
 # --- C++ tables (libmux.so) ---
 #
-COMMON_DEPS = classify integers strings pairs cl_Printable.txt cl_Alpha.txt cl_Digit.txt cl_Alnum.txt cl_AttrNameInitial.txt cl_AttrName.txt cl_PrivateUse.txt tr_utf8_ascii.txt tr_utf8_cp437.txt tr_utf8_latin1.txt tr_utf8_latin2.txt tr_Color.txt tr_tolower.txt tr_toupper.txt tr_totitle.txt cl_8859_1.txt cl_8859_2.txt tr_ccc.txt tr_nfcqc.txt tr_ccc_nfcqc.txt tr_nfd.txt tr_compose.txt tr_gcb.txt cl_ExtPict.txt tr_ducet.txt tr_ducet_contract.txt tr_widths.txt
+COMMON_DEPS = classify integers strings pairs cl_Printable.txt cl_Alpha.txt cl_Digit.txt cl_Alnum.txt cl_AttrNameInitial.txt cl_AttrName.txt cl_PrivateUse.txt tr_utf8_ascii.txt tr_utf8_cp437.txt tr_utf8_latin1.txt tr_utf8_latin2.txt tr_Color.txt tr_tolower.txt tr_toupper.txt tr_totitle.txt cl_8859_1.txt cl_8859_2.txt tr_ccc.txt tr_nfcqc.txt tr_ccc_nfcqc.txt tr_nfd.txt tr_compose.txt tr_gcb.txt cl_ExtPict.txt cl_Word.txt tr_ducet.txt tr_ducet_contract.txt tr_widths.txt
 
 $(CPP_H) $(CPP_CPP): $(COMMON_DEPS)
 	-rm -f $(CPP_CPP) $(CPP_H)
@@ -121,6 +124,7 @@ $(CPP_H) $(CPP_CPP): $(COMMON_DEPS)
 	./pairs    -o $(CPP_CPP) -i $(CPP_H) tr_nfc_compose tr_compose.txt
 	./integers -o $(CPP_CPP) -i $(CPP_H) -d 0 tr_gcb tr_gcb.txt
 	./classify -o $(CPP_CPP) -i $(CPP_H) cl_extpict cl_ExtPict.txt
+	./classify -o $(CPP_CPP) -i $(CPP_H) cl_word cl_Word.txt
 	./integers -o $(CPP_CPP) -i $(CPP_H) -d 0 tr_ducet tr_ducet.txt
 	./pairs    -o $(CPP_CPP) -i $(CPP_H) tr_ducet_contract tr_ducet_contract.txt
 	printf '\n} // extern "C"\n' >> $(CPP_CPP)
