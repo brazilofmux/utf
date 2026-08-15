@@ -13,6 +13,7 @@ make clean        # remove all build artifacts
 ```
 
 Run tests with options: `./tests/test_color_ops [-v] [-f <function>] [-s <seed>]`
+
 - `-v` verbose output, `-f` filter to a single function, `-s` set fuzz seed.
 
 ## Architecture
