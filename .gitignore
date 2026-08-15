@@ -14,3 +14,6 @@ bench/bench_toupper
 bench/bench_grapheme
 *.dSYM/
 bench/bench_collate_libutf
+
+# mdfix -i backups
+*.bak
