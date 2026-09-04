@@ -10,7 +10,14 @@
 #include "utf/collate.h"
 #include "utf/nfc.h"
 #include "utf/utf_tables.h"
-#include <stdatomic.h>
+/* Atomics are used for exactly one thing here: the double-checked lazy init
+ * of the Latin CE cache below.  C11 says a freestanding implementation may
+ * omit <stdatomic.h> and must then define __STDC_NO_ATOMICS__; SLOW-32 is
+ * such a target.  Define UTF_NO_ATOMICS to force the plain path. */
+#if !defined(__STDC_NO_ATOMICS__) && !defined(UTF_NO_ATOMICS)
+#  define UTF_USE_ATOMICS 1
+#  include <stdatomic.h>
+#endif
 #include <string.h>
 #include <stdint.h>
 
@@ -277,7 +284,11 @@ static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
  */
 #define LATIN_CE_LIMIT 0x180
 static uint32_t s_latin_ce[LATIN_CE_LIMIT];
+#if defined(UTF_USE_ATOMICS)
 static atomic_int s_latin_ce_state;
+#else
+static int s_latin_ce_state;
+#endif
 
 static void InitLatinCache(void)
 {
@@ -305,6 +316,7 @@ static void InitLatinCache(void)
     }
 }
 
+#if defined(UTF_USE_ATOMICS)
 static void EnsureLatinCache(void)
 {
     int state = atomic_load_explicit(&s_latin_ce_state, memory_order_acquire);
@@ -324,6 +336,18 @@ static void EnsureLatinCache(void)
         if (2 == state) return;
     }
 }
+#else
+/* No atomics: no second thread either, so the CAS-and-spin collapses to a
+ * plain flag.  The states are the same (0 unset, 2 ready); state 1 exists
+ * only to park a racing thread, and there is none. */
+static void EnsureLatinCache(void)
+{
+    if (2 != s_latin_ce_state) {
+        InitLatinCache();
+        s_latin_ce_state = 2;
+    }
+}
+#endif
 
 /* --- CE collection (bounded fast path) --- */
 
