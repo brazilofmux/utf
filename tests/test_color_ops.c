@@ -3112,6 +3112,44 @@ static void test_cluster_advance(void) {
 
 /* ---- co_console_width (direct tests) ---- */
 
+/* Regression: the NFC tiebreak used to normalize into VLAs sized to the
+ * input length (1x).  NFC can expand up to 3x, so any string that grows
+ * under composition was silently truncated -- utf_collate_sortkey appends
+ * the NFC form unconditionally, so the key carried only a prefix.
+ * U+0958 DEVANAGARI KA WITH NUKTA is a composition exclusion: 3 bytes in,
+ * 6 bytes out (U+0915 U+093C), so two of them expand 6 -> 12. */
+static void test_collate_nfc_tiebreak(void) {
+    const char *name = "collate_nfc_tiebreak";
+
+    const unsigned char src[] = { 0xE0, 0xA5, 0x98, 0xE0, 0xA5, 0x98 };
+    unsigned char nfc[64];
+    size_t nNFC = 0;
+    unsigned char key[512];
+    size_t nKey, i;
+    int found = 0;
+
+    /* The full, correct NFC form -- sized by the library's own bound. */
+    utf_nfc_status st = utf_nfc_normalize(src, sizeof(src), nfc,
+                                          utf_nfc_normalize_bound(sizeof(src)),
+                                          &nNFC);
+    check_size(name, "normalize status", (size_t)st, (size_t)UTF_NFC_OK);
+    check_size(name, "NFC expands 6 -> 12", nNFC, 12);
+
+    /* A 1x buffer -- what the VLAs used to be -- truncates it. */
+    st = utf_nfc_normalize(src, sizeof(src), nfc, sizeof(src), &nNFC);
+    check_size(name, "1x buffer truncates", (size_t)st,
+               (size_t)UTF_NFC_TRUNCATED);
+
+    /* So the sort key must contain the whole NFC form, not a prefix. */
+    utf_nfc_normalize(src, sizeof(src), nfc,
+                      utf_nfc_normalize_bound(sizeof(src)), &nNFC);
+    nKey = utf_collate_sortkey(src, sizeof(src), key, sizeof(key));
+    for (i = 0; nNFC && i + nNFC <= nKey; i++) {
+        if (0 == memcmp(key + i, nfc, nNFC)) { found = 1; break; }
+    }
+    check_size(name, "sortkey carries full NFC tiebreak", (size_t)found, 1);
+}
+
 static void test_console_width(void) {
     const char *name = "console_width";
 
@@ -4466,7 +4504,13 @@ static void test_table_behaviour(void) {
     fp_check(name, "utf_nfc_normalize",  hNfc,   0x3B6F3EC69D5DE065ULL);
     fp_check(name, "utf_grapheme_next",  hGcb,   0x06A84818CDBA25A8ULL);
     fp_check(name, "co_toupper/tolower", hCase,  0x313DB50F84EBAC7AULL);
-    fp_check(name, "utf_collate_sortkey", hSort, 0xEE4F171E0B703A28ULL);
+    /* Changed 2026-09-03 from 0xEE4F171E0B703A28 when the NFC tiebreak
+       stopped truncating: utf_collate_sortkey appends the NFC form, and a
+       1x buffer cut it short for every code point that expands under
+       composition.  Verified confined to the bug -- of all 1,112,064 code
+       points, exactly 92 keys changed and all 92 expand under NFC (nfc >
+       utf8 length); no non-expanding code point moved. */
+    fp_check(name, "utf_collate_sortkey", hSort, 0x8033CCFCDB328359ULL);
 }
 
 /* ================================================================
@@ -4534,6 +4578,7 @@ static const test_suite_t suites[] = {
     { "compress_str",     test_compress_str },
     { "cluster_advance",  test_cluster_advance },
     { "console_width",    test_console_width },
+    { "collate_nfc_tiebreak", test_collate_nfc_tiebreak },
     { "classify_word",    test_classify_word },
     { "classify_connector", test_classify_connector },
     { "classify_census",  test_classify_census },

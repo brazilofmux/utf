@@ -558,30 +558,70 @@ static int CompareTertiaryBuffered(const uint32_t *cesA, int nCEsA,
     return 0;
 }
 
+/* Tiebreak normalization budget.
+ *
+ * The NFC tiebreak is a last resort: it runs only once two strings have
+ * identical DUCET weights, and GetNFCBytes' fast path hands back the input
+ * untouched when it is already NFC.  So these buffers are rarely reached.
+ *
+ * They used to be VLAs sized to the input length, which was wrong twice
+ * over.  NFC can *expand* -- utf_nfc_normalize_bound() is 3x -- so a 1x
+ * buffer silently truncated any string that grows under composition, which
+ * every composition exclusion does (U+0958 is 3 bytes in, 6 out); and the
+ * UTF_NFC_TRUNCATED status that says so was discarded, against the explicit
+ * warning in nfc.h.  Worse, the two VLAs in CompareNFCTiebreak were each
+ * sized to *their own* string, so a long operand and a short one truncated
+ * at different points and the comparison could disagree with itself.
+ * They were also input-sized stack allocations, unbounded by anything the
+ * caller could see, in a library that otherwise never allocates.
+ *
+ * A fixed budget fixes all of it.  Input up to UTF_NFC_TIEBREAK_MAX bytes
+ * normalizes in full; anything longer truncates at the *same* budget for
+ * every string, so comparison and sort key stay consistent with each other
+ * because both reach NFC through this one bound.
+ *
+ * DOCUMENTED FALLBACK: past UTF_NFC_TIEBREAK_MAX input bytes the tiebreak
+ * compares a correctly normalized prefix instead of the whole string, so
+ * two strings that share both their DUCET weights and that prefix tie
+ * rather than order.  Primary, secondary and tertiary collation are
+ * unaffected -- this is only the final byte-level tiebreak.  Raise it with
+ * -DUTF_NFC_TIEBREAK_MAX=N; the cost is stack, two buffers of 3N bytes in
+ * CompareNFCTiebreak. */
+#ifndef UTF_NFC_TIEBREAK_MAX
+#define UTF_NFC_TIEBREAK_MAX 256
+#endif
+/* 3x is utf_nfc_normalize_bound()'s worst case. */
+#define UTF_NFC_TIEBREAK_BUF (3 * UTF_NFC_TIEBREAK_MAX)
+
 static size_t GetNFCBytes(const unsigned char *src, size_t nSrc,
                           unsigned char *buf, size_t nBuf,
                           const unsigned char **ppOut)
 {
+    size_t nOut = 0;
+
     if (utf_nfc_is_nfc(src, nSrc)) {
         *ppOut = src;
         return nSrc;
     }
-    utf_nfc_normalize(src, nSrc, buf, nBuf, &nSrc);
+    /* nOut, not nSrc: the returned length must describe what is actually in
+       buf.  A non-OK status means that is a correctly normalized prefix --
+       accepted deliberately, per the fallback note above -- and nfc.h warns
+       that the length alone cannot reveal it, since NFC legitimately
+       shrinks text too. */
+    (void)utf_nfc_normalize(src, nSrc, buf, nBuf, &nOut);
     *ppOut = buf;
-    return nSrc;
+    return nOut;
 }
 
 static int CompareNFCTiebreak(const unsigned char *a, size_t nA,
                               const unsigned char *b, size_t nB)
 {
-    size_t capA = nA ? nA : 1;
-    size_t capB = nB ? nB : 1;
-    unsigned char nfcBufA[capA];
-    unsigned char nfcBufB[capB];
+    unsigned char nfcBufA[UTF_NFC_TIEBREAK_BUF];
+    unsigned char nfcBufB[UTF_NFC_TIEBREAK_BUF];
     const unsigned char *tieA;
     const unsigned char *tieB;
-    size_t tieNA = GetNFCBytes(a, nA, nfcBufA, capA, &tieA);
-    size_t tieNB = GetNFCBytes(b, nB, nfcBufB, capB, &tieB);
+    size_t tieNA = GetNFCBytes(a, nA, nfcBufA, sizeof(nfcBufA), &tieA);
+    size_t tieNB = GetNFCBytes(b, nB, nfcBufB, sizeof(nfcBufB), &tieB);
     size_t nMin = (tieNA < tieNB) ? tieNA : tieNB;
     int cmp = memcmp(tieA, tieB, nMin);
     if (0 != cmp) return cmp;
@@ -625,10 +665,9 @@ static void AppendNFCTiebreak(const unsigned char *src, size_t nSrc,
                               unsigned char *key, size_t nKeyMax,
                               size_t *pPos)
 {
-    size_t cap = nSrc ? nSrc : 1;
-    unsigned char nfcBuf[cap];
+    unsigned char nfcBuf[UTF_NFC_TIEBREAK_BUF];
     const unsigned char *norm;
-    size_t nNorm = GetNFCBytes(src, nSrc, nfcBuf, cap, &norm);
+    size_t nNorm = GetNFCBytes(src, nSrc, nfcBuf, sizeof(nfcBuf), &norm);
     AppendByte(key, nKeyMax, pPos, 0);
     for (size_t i = 0; i < nNorm; i++)
         AppendByte(key, nKeyMax, pPos, norm[i]);
