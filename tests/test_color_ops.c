@@ -1454,6 +1454,27 @@ static void test_grapheme_clusters(void) {
     check_size("co_cluster_count", "🇺🇸 flag",
         co_cluster_count(flag_us, sizeof(flag_us)), 1);
 
+    /* GB4: CR ÷ -- a mark after a CR does not join it; CR LF is one (GB3). */
+    const unsigned char cr_mark[] = { 0x0D, 0xCC, 0x88 };
+    check_size("utf_grapheme_count", "CR + combining diaeresis",
+        utf_grapheme_count(cr_mark, sizeof(cr_mark)), 2);
+    check_size("co_cluster_count", "CR + combining diaeresis",
+        co_cluster_count(cr_mark, sizeof(cr_mark)), 2);
+    check_size("utf_grapheme_count", "CR LF",
+        utf_grapheme_count((const unsigned char *)"\r\n", 2), 1);
+
+    /* GB12/13: RIs pair only when adjacent -- RI Extend RI is two clusters
+     * (UAX #29 GraphemeBreakTest: ÷ 1F1E6 × 0308 ÷ 1F1E6 ÷). */
+    const unsigned char ri_mark_ri[] = {
+        0xF0, 0x9F, 0x87, 0xA6,       /* U+1F1E6 */
+        0xCC, 0x88,                   /* U+0308 */
+        0xF0, 0x9F, 0x87, 0xA6        /* U+1F1E6 */
+    };
+    check_size("utf_grapheme_count", "RI Extend RI",
+        utf_grapheme_count(ri_mark_ri, sizeof(ri_mark_ri)), 2);
+    check_size("co_cluster_count", "RI Extend RI",
+        co_cluster_count(ri_mark_ri, sizeof(ri_mark_ri)), 2);
+
     /* co_mid_cluster: extract second cluster from "AëB" where ë = e+combining. */
     /* "A" + "e" + combining_diaeresis + "B" = 3 clusters. */
     const unsigned char aeb[] = { 'A', 0x65, 0xCC, 0x88, 'B' };

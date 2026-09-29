@@ -119,6 +119,11 @@ size_t utf_grapheme_next(const unsigned char *src, size_t nSrc)
         if (GCB_CR == prevGCB && GCB_LF == curGCB)
             return (size_t)(pNextEnd - src);
 
+        /* GB4: CR ÷ -- anything but LF after a CR starts a new cluster
+         * (the check above only covers a first code point of Control or LF) */
+        if (GCB_CR == prevGCB)
+            break;
+
         /* GB5: ÷ (Control|CR|LF) */
         if (GCB_Control == curGCB || GCB_CR == curGCB || GCB_LF == curGCB)
             break;
@@ -157,8 +162,11 @@ size_t utf_grapheme_next(const unsigned char *src, size_t nSrc)
         if (!extend && bSeenEPEZ && GCB_ZWJ == prevGCB && bCurExtPict)
             extend = 1;
 
-        /* GB12/13: RI × RI (pairs only) */
-        if (!extend && GCB_Regional_Indicator == curGCB && (nRI % 2) == 1)
+        /* GB12/13: RI × RI (pairs only), and only of adjacent RIs: an RI
+         * after Extend or ZWJ begins a new cluster even when the count
+         * so far is odd */
+        if (!extend && GCB_Regional_Indicator == curGCB &&
+            GCB_Regional_Indicator == prevGCB && (nRI % 2) == 1)
             extend = 1;
 
         if (!extend) break;  /* GB999: ÷ */
