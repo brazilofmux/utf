@@ -146,7 +146,13 @@ static size_t next_grapheme_plain(const unsigned char *src, size_t nSrc)
     if (GCB_Control == prevGCB || GCB_LF == prevGCB)
         return (size_t)(pCur - src);
 
-    int bSeenEPEZ = bPrevExtPict;  /* GB11 */
+    /* GB11 progress through "ExtPict Extend* ZWJ x ExtPict":
+     *   0 -- no live ExtPict sequence
+     *   1 -- ExtPict Extend* seen
+     *   2 -- ExtPict Extend* ZWJ seen; an ExtPict may join now
+     * A boolean cannot tell "ExtPict Extend*" from a completed ZWJ link,
+     * so ExtPict ZWJ ZWJ ExtPict used to join.  Ports TinyMUX c3fafc153. */
+    int gb11State = bPrevExtPict ? 1 : 0;
     int nRI = (GCB_Regional_Indicator == prevGCB) ? 1 : 0;  /* GB12/13 */
 
     while (pCur < pEnd) {
@@ -198,7 +204,7 @@ static size_t next_grapheme_plain(const unsigned char *src, size_t nSrc)
             extend = 1;
 
         /* GB11: ExtPict Extend* ZWJ × ExtPict */
-        if (!extend && bSeenEPEZ && GCB_ZWJ == prevGCB && bCurExtPict)
+        if (!extend && 2 == gb11State && bCurExtPict)
             extend = 1;
 
         /* GB12/13: RI × RI (pairs only), and only of adjacent RIs: an RI
@@ -212,9 +218,13 @@ static size_t next_grapheme_plain(const unsigned char *src, size_t nSrc)
 
         /* Continue cluster. */
         if (GCB_Regional_Indicator == curGCB) nRI++;
-        if (bCurExtPict) bSeenEPEZ = 1;
-        else if (!bSeenEPEZ || (GCB_Extend != curGCB && GCB_ZWJ != curGCB))
-            bSeenEPEZ = 0;
+        if (bCurExtPict) gb11State = 1;
+        else if (1 == gb11State && GCB_Extend == curGCB)
+            ;  /* still "ExtPict Extend*" */
+        else if (1 == gb11State && GCB_ZWJ == curGCB)
+            gb11State = 2;
+        else
+            gb11State = 0;  /* includes a second ZWJ arriving in state 2 */
 
         prevGCB = curGCB;
         pCur = pNextEnd;

@@ -1475,6 +1475,28 @@ static void test_grapheme_clusters(void) {
     check_size("co_cluster_count", "RI Extend RI",
         co_cluster_count(ri_mark_ri, sizeof(ri_mark_ri)), 2);
 
+    /* GB11: "ExtPict Extend* ZWJ x ExtPict" allows exactly one ZWJ, so
+     * ExtPict ZWJ ZWJ ExtPict is two clusters; ExtPict ZWJ ExtPict (the
+     * positive control) stays one.  Not in GraphemeBreakTest.txt; found by
+     * TinyMUX's ICU differential (c3fafc153). */
+    const unsigned char ep_zwj_zwj_ep[] = {
+        0xF0, 0x9F, 0x98, 0x80,       /* U+1F600 */
+        0xE2, 0x80, 0x8D,             /* ZWJ */
+        0xE2, 0x80, 0x8D,             /* ZWJ */
+        0xF0, 0x9F, 0x98, 0x80        /* U+1F600 */
+    };
+    check_size("utf_grapheme_count", "ExtPict ZWJ ZWJ ExtPict",
+        utf_grapheme_count(ep_zwj_zwj_ep, sizeof(ep_zwj_zwj_ep)), 2);
+    check_size("co_cluster_count", "ExtPict ZWJ ZWJ ExtPict",
+        co_cluster_count(ep_zwj_zwj_ep, sizeof(ep_zwj_zwj_ep)), 2);
+    const unsigned char ep_zwj_ep[] = {
+        0xF0, 0x9F, 0x98, 0x80, 0xE2, 0x80, 0x8D, 0xF0, 0x9F, 0x98, 0x80
+    };
+    check_size("utf_grapheme_count", "ExtPict ZWJ ExtPict",
+        utf_grapheme_count(ep_zwj_ep, sizeof(ep_zwj_ep)), 1);
+    check_size("co_cluster_count", "ExtPict ZWJ ExtPict",
+        co_cluster_count(ep_zwj_ep, sizeof(ep_zwj_ep)), 1);
+
     /* co_mid_cluster: extract second cluster from "AëB" where ë = e+combining. */
     /* "A" + "e" + combining_diaeresis + "B" = 3 clusters. */
     const unsigned char aeb[] = { 'A', 0x65, 0xCC, 0x88, 'B' };
