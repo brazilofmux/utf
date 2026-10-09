@@ -4,7 +4,8 @@ A grab-and-go Unicode library built on compressed DFAs and Ragel -G2
 state machines.  Processes UTF-8 directly — no conversion to UTF-16
 and back.  No malloc.  No dependencies.  702 KB.
 
-Unicode 16.0.  MIT licensed.
+Unicode 16.0.  MIT licensed; the Unicode data and the tables generated
+from it are under the Unicode License V3 (see below).
 
 ```
 git clone https://github.com/brazilofmux/utf.git
@@ -181,7 +182,14 @@ gen/               Code generation pipeline (C++ tools + Perl + Unicode data)
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+The code is MIT — see [LICENSE](LICENSE).
+
+The Unicode Character Database files and CLDR files under `gen/data/`,
+and the tables generated from them under `tables/` and in
+`include/utf/utf_tables.h`, are derived from data copyright Unicode, Inc.
+and are under the Unicode License V3 — see
+[LICENSE-UNICODE](LICENSE-UNICODE).  Ship that notice alongside any copy
+of the tables.
 
 ## Origin
 

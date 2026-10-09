@@ -84,7 +84,7 @@ Downloaded from https://www.unicode.org/Public/16.0.0/ucd/:
 ## Collation and locales
 
 `gen_ducet.py` builds every collator from DUCET and the CLDR 46 rules in
-`data/cldr/collation/` (Unicode license in `data/cldr/LICENSE`), using
+`data/cldr/collation/` (Unicode License V3, `../LICENSE-UNICODE`), using
 `cldr_tailor.py` to apply the rules and `dfa_pool.py` to build the DFAs.
 All collators share one pool of DFA states, so a locale costs only the
 rows its tailoring changes.  The locales are listed in `LOCALES` at the
