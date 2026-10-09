@@ -160,7 +160,18 @@ extern UTF_API const unsigned short tr_ducet_contract_sbt[2813];
 #define TR_DUCET_CONTRACT_NFC_COMPOSE_RESULTS (953)
 extern UTF_API const uint32_t tr_ducet_contract_nfc_compose_result[954];
 
-/* DUCET CE weight/offset tables (from ducet_cetable) */
+/* DUCET CE weight/offset tables (from ducet_cetable, by gen/gen_ducet.py).
+ *
+ * A CE is a uint32_t:  bit 31 variable flag, bits 30-16 primary,
+ * bits 15-7 secondary, bits 6-0 tertiary.  A primary of 0x8000 or more
+ * (implicit-style leads, their trails, U+FFFD) spills into the variable bit;
+ * order survives the 15-bit mask, but the flag cannot be trusted there.
+ * ducet_cetable.c asserts these against what the generator packed. */
+#define DUCET_CE_SECONDARY_SHIFT 7
+#define DUCET_CE_SECONDARY_MASK  0x1FF
+#define DUCET_CE_TERTIARY_MASK   0x7F
+#define DUCET_COMMON_SECONDARY   0x0020
+#define DUCET_COMMON_TERTIARY    0x02
 #define DUCET_CE_SEQUENCES 35505
 extern const unsigned short ducet_ce_offset[35507];
 extern const uint32_t ducet_ce_weights[];

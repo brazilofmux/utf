@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Generate libutf's DUCET collation element tables from allkeys.txt.
+
+Outputs (paths relative to this script):
+  data/tr_ducet.txt            CODEPOINT;CE_INDEX       (input to integers)
+  data/tr_ducet_contract.txt   CP1 CP2;CE_INDEX (hex)   (input to pairs)
+  ../tables/ducet_cetable.c    CE weights and offsets, three-code-point
+                               contractions
+
+CE index 0 is reserved for "not in DUCET -- use implicit weights"; real CE
+sequences are numbered from 1 in the order allkeys.txt first uses them.
+
+Collation elements are packed into a uint32_t:
+
+  bit  31      variable flag
+  bits 30-16   primary   (15 bits)
+  bits 15-7    secondary ( 9 bits)
+  bits 6-0     tertiary  ( 7 bits)
+
+The primary and the variable flag share the top half as (primary | var << 15),
+so a primary of 0x8000 or more -- DUCET's implicit-style leads (FBxx), the
+trail weight after each, and U+FFFD's FFFD -- sets the variable bit and loses
+its own top bit to the 15-bit mask.  That keeps every comparison in order,
+since a trail weight only ever meets another trail weight after equal leads,
+but it means the variable flag is not trustworthy until something reads it.
+
+Weights pass through respace() on the way out.  A tailoring that puts a new
+element between two root weights needs integer room there, so each level can
+reserve slots after a root weight, and every weight above moves up by the
+slots reserved beneath it.  Root reserves nothing, so today respace() is the
+identity and the packed weights are DUCET's own.
+"""
+import os
+import re
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DATA = os.path.join(HERE, 'data')
+TABLES = os.path.join(HERE, '..', 'tables')
+
+COMMON_SECONDARY = 0x0020
+COMMON_TERTIARY = 0x0002
+SECONDARY_BITS = 9
+TERTIARY_BITS = 7
+
+
+def parse_allkeys(path):
+    """Entries as (code points, CEs) in file order; CE = (p, s, t, var)."""
+    entries = []
+    for line in open(path, encoding='utf-8'):
+        line = line.split('#', 1)[0].strip()
+        if not line or line.startswith('@'):
+            continue
+        cps, ces = line.split(';')
+        cps = tuple(int(c, 16) for c in cps.split())
+        ces = tuple((int(p, 16), int(s, 16), int(t, 16), v == '*')
+                    for v, p, s, t in re.findall(
+                        r'\[([.*])([0-9A-F]{4})\.([0-9A-F]{4})\.([0-9A-F]{4})\]', ces))
+        if not ces:
+            sys.exit('no CEs parsed: %s' % line)
+        entries.append((cps, ces))
+    return entries
+
+
+def respace(values, reserve):
+    """Map each root weight to its respaced value.
+
+    values: the distinct root weights at one level.  reserve: root weight ->
+    slots to leave free just above it.  A weight moves up by the slots
+    reserved below it; 0 (ignorable at this level) never moves.
+    """
+    shift, out = 0, {0: 0}
+    for v in sorted(values):
+        if v:
+            out[v] = v + shift
+        shift += reserve.get(v, 0)
+    return out
+
+
+def pack(ce, maps):
+    p, s, t, var = ce
+    s, t = maps[1][s], maps[2][t]
+    if s >= 1 << SECONDARY_BITS or t >= 1 << TERTIARY_BITS:
+        sys.exit('weight overflows its field: secondary %#x, tertiary %#x' % (s, t))
+    hi = (maps[0][p] | (var << 15)) & 0xFFFF
+    return (hi << 16) | (s << TERTIARY_BITS) | t
+
+
+def main():
+    entries = parse_allkeys(os.path.join(DATA, 'allkeys.txt'))
+
+    seq_index = {}
+    for _, ces in entries:
+        seq_index.setdefault(ces, len(seq_index) + 1)
+
+    singles = sorted((cps[0], seq_index[ces]) for cps, ces in entries if len(cps) == 1)
+    pairs = sorted((cps, seq_index[ces]) for cps, ces in entries if len(cps) == 2)
+    triples = [(cps, seq_index[ces]) for cps, ces in entries if len(cps) == 3]
+    longer = [cps for cps, _ in entries if len(cps) > 3]
+    if longer:
+        sys.exit('contractions longer than three code points: %r' % longer[:3])
+
+    # Root reserves no slots, so this is the identity map today.
+    levels = [sorted({ce[i] for ces in seq_index for ce in ces}) for i in range(3)]
+    maps = [respace(levels[i], {}) for i in range(3)]
+    common_s, common_t = maps[1][COMMON_SECONDARY], maps[2][COMMON_TERTIARY]
+
+    with open(os.path.join(DATA, 'tr_ducet.txt'), 'w') as f:
+        for cp, idx in singles:
+            f.write('%04X;%d\n' % (cp, idx))
+    with open(os.path.join(DATA, 'tr_ducet_contract.txt'), 'w') as f:
+        for (a, b), idx in pairs:
+            f.write('%04X %04X;%04X\n' % (a, b, idx))
+
+    offsets, weights = [0], []
+    for ces in seq_index:               # dicts keep insertion order: index 1..N
+        offsets.append(len(weights))
+        weights.extend(pack(ce, maps) for ce in ces)
+    offsets.append(len(weights))
+    if offsets[-1] > 0xFFFF:
+        sys.exit('ducet_ce_offset no longer fits unsigned short')
+
+    out = []
+    w = out.append
+    w('/* ducet_cetable.c -- DUCET CE weight/offset tables.\n'
+      ' *\n'
+      ' * Generated by gen/gen_ducet.py from gen/data/allkeys.txt (Unicode 16.0).\n'
+      ' * DO NOT EDIT -- regenerate with: python3 gen/gen_ducet.py\n'
+      ' *\n'
+      ' * CE index 0 = sentinel (use implicit weights).\n'
+      ' * Indices 1..N are real CE sequences from DUCET.\n'
+      ' */\n'
+      '#include "utf/utf_tables.h"\n\n')
+    w('/* The reader in collate.c unpacks with utf_tables.h\'s layout and builds\n'
+      ' * implicit CEs from its common weights; both must match what was packed. */\n')
+    w('_Static_assert(DUCET_CE_SECONDARY_SHIFT == %d, "CE layout changed");\n' % TERTIARY_BITS)
+    w('_Static_assert(DUCET_CE_SECONDARY_MASK == 0x%X, "CE layout changed");\n' % ((1 << SECONDARY_BITS) - 1))
+    w('_Static_assert(DUCET_CE_TERTIARY_MASK == 0x%X, "CE layout changed");\n' % ((1 << TERTIARY_BITS) - 1))
+    w('_Static_assert(DUCET_COMMON_SECONDARY == 0x%04X, "common secondary moved");\n' % common_s)
+    w('_Static_assert(DUCET_COMMON_TERTIARY == 0x%02X, "common tertiary moved");\n\n' % common_t)
+
+    w('/* Offset table: ducet_ce_offset[i] is the start index in\n'
+      ' * ducet_ce_weights[] for CE sequence i.  The number of CEs\n'
+      ' * for sequence i is ducet_ce_offset[i+1] - ducet_ce_offset[i].\n'
+      ' * Index 0 is the sentinel (no CEs = use implicit weights).\n'
+      ' */\n')
+    w('#define DUCET_CE_SEQUENCES %d\n\n' % len(seq_index))
+    w('const unsigned short ducet_ce_offset[%d] =\n{\n' % len(offsets))
+    for i in range(0, len(offsets), 16):
+        row = ','.join('%5d' % v for v in offsets[i:i + 16])
+        w('    %s%s\n' % (row, ',' if i + 16 < len(offsets) else ''))
+    w('};\n\n')
+
+    w('/* Packed CE weights; layout in utf_tables.h (DUCET_CE_*). */\n')
+    w('#define DUCET_CE_TOTAL %d\n\n' % len(weights))
+    w('const uint32_t ducet_ce_weights[%d] =\n{\n' % len(weights))
+    for i in range(0, len(weights), 8):
+        row = ','.join('0x%08X' % v for v in weights[i:i + 8])
+        w('    %s%s\n' % (row, ',' if i + 8 < len(weights) else ''))
+    w('};\n\n')
+
+    w('/* Three-code-point contractions (%d in Unicode 16.0), tried before the\n'
+      ' * two-code-point DFA so the longest contraction wins. */\n' % len(triples))
+    w('#define DUCET_CONTRACT3_COUNT %d\n\n' % len(triples))
+    w('const utf_ducet_contract3 ducet_contract3[%d] =\n{\n' % len(triples))
+    for (a, b, c), idx in triples:
+        w('    { 0x%04X, 0x%04X, 0x%04X, %d },\n' % (a, b, c, idx))
+    w('};\n')
+
+    with open(os.path.join(TABLES, 'ducet_cetable.c'), 'w') as f:
+        f.write(''.join(out))
+
+    print('%d entries: %d single, %d pairs, %d triples; %d CE sequences, %d CEs'
+          % (len(entries), len(singles), len(pairs), len(triples),
+             len(seq_index), len(weights)), file=sys.stderr)
+
+
+if __name__ == '__main__':
+    main()

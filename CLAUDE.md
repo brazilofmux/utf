@@ -34,7 +34,7 @@ Colors are encoded as Unicode Private Use Area codepoints inline in UTF-8 string
 - **`src/{cie97,collate,grapheme,nfc,console_width,classify}.c`** — Hand-written implementations for each module.
 - **`include/utf/`** — Public API headers.
 - **`tables/`** — Pre-generated compressed DFA tables in C. These are large generated files; modify via the `gen/` pipeline, not by hand.
-- **`gen/`** — Table generation pipeline (C++ DFA builders + Perl scripts + Unicode 16.0 data files). Only needed when updating Unicode version.
+- **`gen/`** — Table generation pipeline (C++ DFA builders + Perl scripts + Unicode 16.0 data files). Only needed when updating Unicode version. `gen/gen_ducet.py` (Python 3) writes `tables/ducet_cetable.c` directly; its `_Static_assert`s pin the CE packing and common weights to `utf_tables.h`.
 
 ### Key build notes
 

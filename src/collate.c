@@ -24,15 +24,22 @@
 #define UNI_EOF ((uint32_t)-1)
 #define UTF8_CONTINUE 5
 
-/* CE weight unpacking from uint32_t.
+/* CE weight unpacking from uint32_t; layout in utf_tables.h.
  *   Bit  31:    variable flag
  *   Bits 30-16: primary weight (15 bits)
- *   Bits 15-5:  secondary weight (11 bits)
- *   Bits 4-0:   tertiary weight (5 bits)
+ *   Bits 15-7:  secondary weight (9 bits)
+ *   Bits 6-0:   tertiary weight (7 bits)
  */
 #define CE_PRIMARY(w)   (((w) >> 16) & 0x7FFF)
-#define CE_SECONDARY(w) (((w) >> 5) & 0x07FF)
-#define CE_TERTIARY(w)  ((w) & 0x1F)
+#define CE_SECONDARY(w) (((w) >> DUCET_CE_SECONDARY_SHIFT) & DUCET_CE_SECONDARY_MASK)
+#define CE_TERTIARY(w)  ((w) & DUCET_CE_TERTIARY_MASK)
+
+/* The first CE of an implicit weight: primary AAAA with common secondary
+ * and tertiary (UCA 10.1.3).  The second is BBBB << 16, all else zero. */
+#define CE_IMPLICIT_LEAD(aaaa) \
+    (((uint32_t)(aaaa) << 16) \
+     | ((uint32_t)DUCET_COMMON_SECONDARY << DUCET_CE_SECONDARY_SHIFT) \
+     | DUCET_COMMON_TERTIARY)
 
 /* Per-code-point CE scratch space.
  * DUCET mappings are short; comparison and sortkey generation stream the
@@ -279,7 +286,7 @@ static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
             unsigned short aaaa, bbbb;
             ImplicitWeight((uint32_t)*p, &aaaa, &bbbb);
             if (nCEs < maxCEs)
-                ces[nCEs++] = ((uint32_t)aaaa << 16) | ((uint32_t)0x0020 << 5) | 0x0002;
+                ces[nCEs++] = CE_IMPLICIT_LEAD(aaaa);
             if (nCEs < maxCEs)
                 ces[nCEs++] = (uint32_t)bbbb << 16;
         }
@@ -319,7 +326,7 @@ static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
             unsigned short aaaa, bbbb;
             ImplicitWeight(cp, &aaaa, &bbbb);
             if (nCEs < maxCEs)
-                ces[nCEs++] = ((uint32_t)aaaa << 16) | ((uint32_t)0x0020 << 5) | 0x0002;
+                ces[nCEs++] = CE_IMPLICIT_LEAD(aaaa);
             if (nCEs < maxCEs)
                 ces[nCEs++] = (uint32_t)bbbb << 16;
         }
@@ -474,8 +481,7 @@ static int CollectCEsBounded(const unsigned char *src, size_t nSrc,
                     *pOverflow = 1;
                     break;
                 }
-                ces[nCEs++] = ((uint32_t)(0xFB40 + (unsigned short)(cp >> 15)) << 16)
-                            | ((uint32_t)0x0020 << 5) | 0x0002;
+                ces[nCEs++] = CE_IMPLICIT_LEAD(0xFB40 + (unsigned short)(cp >> 15));
                 ces[nCEs++] = (uint32_t)((cp & 0x7FFF) | 0x8000) << 16;
                 p += 3;
                 continue;

@@ -1,7 +1,7 @@
 # Code Generation Pipeline
 
-This directory contains the C++ tools and Perl scripts that generate the
-compressed DFA tables from Unicode data files.  **You do not need this
+This directory contains the C++ tools and Perl and Python scripts that
+generate the compressed DFA tables from Unicode data files.  **You do not need this
 to use the library** — the pre-generated C tables in `../tables/` are
 ready to compile.
 
@@ -11,6 +11,7 @@ Use this pipeline only when updating to a new Unicode version.
 
 - C++ compiler (g++ or clang++)
 - Perl 5
+- Python 3 (gen_ducet.py)
 - GNU Make / autoconf (optional, for `Makefile.in`)
 
 ## Pipeline Overview
@@ -19,7 +20,7 @@ Use this pipeline only when updating to a new Unicode version.
 Unicode data files (data/)
         |
         v
-  Perl scripts (gen_*.pl)
+  Perl and Python scripts (gen_*.pl, gen_ducet.py)
         |
         v
   Intermediate .txt files (data/cl_*.txt, data/tr_*.txt)
@@ -44,13 +45,13 @@ Unicode data files (data/)
 All tools share `smutil.cpp/h` (state machine compression library) and
 `ConvertUTF.cpp/h` (UTF-8/16/32 conversion).
 
-## Perl Scripts
+## Scripts
 
 | Script | Input | Output |
 |--------|-------|--------|
 | gen_ccc.pl | UnicodeData.txt | data/tr_ccc.txt |
 | gen_compose.pl | UnicodeData.txt, CompositionExclusions.txt | data/tr_compose.txt |
-| gen_ducet.pl | allkeys.txt, DerivedNormalizationProps.txt | data/tr_ducet.txt, data/tr_ducet_contract.txt, ducet_cetable.h |
+| gen_ducet.py | allkeys.txt | data/tr_ducet.txt, data/tr_ducet_contract.txt, ../tables/ducet_cetable.c |
 | gen_extpict.pl | emoji-data.txt | data/cl_ExtPict.txt |
 | gen_gcb.pl | GraphemeBreakProperty.txt | data/tr_gcb.txt |
 | gen_word.pl | DerivedCoreProperties.txt, UnicodeData.txt | data/cl_Word.txt |
