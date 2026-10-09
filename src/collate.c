@@ -10,14 +10,6 @@
 #include "utf/collate.h"
 #include "utf/nfc.h"
 #include "utf/utf_tables.h"
-/* Atomics are used for exactly one thing here: the double-checked lazy init
- * of the Latin CE cache below.  C11 says a freestanding implementation may
- * omit <stdatomic.h> and must then define __STDC_NO_ATOMICS__; SLOW-32 is
- * such a target.  Define UTF_NO_ATOMICS to force the plain path. */
-#if !defined(__STDC_NO_ATOMICS__) && !defined(UTF_NO_ATOMICS)
-#  define UTF_USE_ATOMICS 1
-#  include <stdatomic.h>
-#endif
 #include <string.h>
 #include <stdint.h>
 
@@ -105,9 +97,10 @@ static uint32_t utf8_decode_c(const unsigned char *p, const unsigned char *pEnd)
 
 /* --- DFA lookups --- */
 
-static int GetDUCET(const unsigned char *p, const unsigned char *pEnd)
+static int GetDUCET(const utf_collator *c,
+                    const unsigned char *p, const unsigned char *pEnd)
 {
-    int iState = TR_DUCET_START_STATE;
+    int iState = c->ducet_start;
     /* Stop at the first accepting state (see run_dfa in grapheme.c). */
     while (p < pEnd && iState < TR_DUCET_ACCEPTING_STATES_START) {
         unsigned char ch = *p++;
@@ -129,10 +122,11 @@ static int GetDUCET(const unsigned char *p, const unsigned char *pEnd)
          ? iState - TR_DUCET_ACCEPTING_STATES_START : 0;
 }
 
-static int GetContraction(const unsigned char *p1, const unsigned char *p1End,
+static int GetContraction(const utf_collator *c,
+                          const unsigned char *p1, const unsigned char *p1End,
                           const unsigned char *p2, const unsigned char *p2End)
 {
-    int iState = TR_DUCET_CONTRACT_START_STATE;
+    int iState = c->contract_start;
 
     while (p1 < p1End && iState < TR_DUCET_CONTRACT_ACCEPTING_STATES_START) {
         unsigned char ch = *p1++;
@@ -179,48 +173,24 @@ static int GetContraction(const unsigned char *p1, const unsigned char *p1End,
  * DFA.  p1 is the first code point's bytes, already known to start a
  * contraction; on a match *ppEnd moves past the third code point.
  */
-static int GetContraction3(const unsigned char *p1, const unsigned char *p2,
+static int GetContraction3(const utf_collator *c,
+                           const unsigned char *p1, const unsigned char *p2,
                            const unsigned char *pEnd,
                            const unsigned char **ppEnd)
 {
+    const utf_ducet_contract3 *t = c->contract3;
     uint32_t cp1 = utf8_decode_c(p1, p2);
-    for (int i = 0; i < DUCET_CONTRACT3_COUNT; i++) {
-        if (ducet_contract3[i].cp1 != cp1) continue;
+    for (int i = 0; i < c->n_contract3; i++) {
+        if (t[i].cp1 != cp1) continue;
         const unsigned char *p3 = utf8_advance_c(p2, pEnd);
-        if (p3 >= pEnd || ducet_contract3[i].cp2 != utf8_decode_c(p2, p3))
+        if (p3 >= pEnd || t[i].cp2 != utf8_decode_c(p2, p3))
             continue;
         const unsigned char *p4 = utf8_advance_c(p3, pEnd);
-        if (ducet_contract3[i].cp3 != utf8_decode_c(p3, p4)) continue;
+        if (t[i].cp3 != utf8_decode_c(p3, p4)) continue;
         *ppEnd = p4;
-        return ducet_contract3[i].ce_index;
+        return t[i].ce_index;
     }
     return 0;
-}
-
-/* Could a contraction begin with this code point?  Only the Latin cache
- * asks, once per code point, so it runs the DFA rather than keeping a
- * second table: a code point that starts no contraction drives the DFA
- * into an accepting state (no match) before its bytes run out.
- */
-static int StartsContraction(const unsigned char *p, const unsigned char *pEnd)
-{
-    int iState = TR_DUCET_CONTRACT_START_STATE;
-    while (p < pEnd && iState < TR_DUCET_CONTRACT_ACCEPTING_STATES_START) {
-        int iColumn = tr_ducet_contract_itt[*p++];
-        int iOffset = tr_ducet_contract_sot[iState];
-        for (;;) {
-            int y = tr_ducet_contract_sbt[iOffset];
-            if (y < 128) {
-                if (iColumn < y) { iState = tr_ducet_contract_sbt[iOffset + 1]; break; }
-                iColumn -= y; iOffset += 2;
-            } else {
-                y = 256 - y;
-                if (iColumn < y) { iState = tr_ducet_contract_sbt[iOffset + iColumn + 1]; break; }
-                iColumn -= y; iOffset += y + 1;
-            }
-        }
-    }
-    return iState < TR_DUCET_CONTRACT_ACCEPTING_STATES_START;
 }
 
 /* --- Implicit weights (UCA Section 10.1) --- */
@@ -265,7 +235,8 @@ static void ImplicitWeight(uint32_t cp, unsigned short *aaaa, unsigned short *bb
  * Advances *pp past the consumed input bytes.
  * Returns number of CEs written to ces[].
  */
-static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
+static int ExtractCEs(const utf_collator *c,
+                      const unsigned char **pp, const unsigned char *pEnd,
                       uint32_t *ces, int maxCEs)
 {
     const unsigned char *p = *pp;
@@ -276,7 +247,7 @@ static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
      * middle dot).  Column 0 of the contraction DFA starts none.
      */
     if (*p < 0x80 && 0 == tr_ducet_contract_itt[*p]) {
-        int ceIndex = GetDUCET(p, p + 1);
+        int ceIndex = GetDUCET(c, p, p + 1);
         if (0 != ceIndex) {
             int start = ducet_ce_offset[ceIndex];
             int end   = ducet_ce_offset[ceIndex + 1];
@@ -305,15 +276,15 @@ static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
      * longest contraction wins, so three code points are tried first.
      */
     if (tr_ducet_contract_itt[*p] != 0 && pNext < pEnd) {
-        ceIndex = GetContraction3(p, pNext, pEnd, &pConsumed);
+        ceIndex = GetContraction3(c, p, pNext, pEnd, &pConsumed);
         if (0 == ceIndex) {
             const unsigned char *pNext2 = utf8_advance_c(pNext, pEnd);
-            ceIndex = GetContraction(p, pNext, pNext, pNext2);
+            ceIndex = GetContraction(c, p, pNext, pNext, pNext2);
             if (0 != ceIndex) pConsumed = pNext2;
         }
     }
 
-    if (0 == ceIndex) ceIndex = GetDUCET(p, pNext);
+    if (0 == ceIndex) ceIndex = GetDUCET(c, p, pNext);
 
     if (0 != ceIndex) {
         int start = ducet_ce_offset[ceIndex];
@@ -335,111 +306,44 @@ static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
     return nCEs;
 }
 
-/* --- Latin CE cache --- */
+/* --- Latin fast path --- */
 
-/* Precomputed CE for U+0000..U+017F (Basic Latin + Latin-1 Supplement +
- * Latin Extended-A).  Most characters in this range have exactly one CE
- * in DUCET.  A value of 0 means "use slow path" (multi-CE or unmapped).
+/* Each collator carries generated tables of the CE of every code point in
+ * U+0000..U+017F (Basic Latin + Latin-1 Supplement + Latin Extended-A) that
+ * has exactly one; 0 means "use the full path" (multi-CE or unmapped).
  *
  * This is the key fast path: Latin text skips DFA traversal, contraction
- * checks, and UTF-8 validation entirely — one table lookup per character.
- * A character that can start a contraction (l and L, for l·) is 0 there,
- * keeping the common case one load and one branch; its CE is in
- * s_latin_starter_ce instead, good only when the next character does not
+ * checks, and UTF-8 validation entirely -- one table lookup per character.
+ * A character that can start a contraction (l and L, for l·) is 0 in
+ * latin_ce, keeping the common case one load and one branch; its CE is in
+ * latin_starter_ce instead, good only when the next character does not
  * complete a contraction (LatinStarterCE checks).
  */
-#define LATIN_CE_LIMIT 0x180
-static uint32_t s_latin_ce[LATIN_CE_LIMIT];
-static uint32_t s_latin_starter_ce[LATIN_CE_LIMIT];
-#if defined(UTF_USE_ATOMICS)
-static atomic_int s_latin_ce_state;
-#else
-static int s_latin_ce_state;
-#endif
 
-static void InitLatinCache(void)
-{
-    for (int cp = 0; cp < LATIN_CE_LIMIT; cp++) {
-        unsigned char buf[2];
-        int n;
-        if (cp < 0x80) {
-            buf[0] = (unsigned char)cp;
-            n = 1;
-        } else {
-            buf[0] = (unsigned char)(0xC0 | (cp >> 6));
-            buf[1] = (unsigned char)(0x80 | (cp & 0x3F));
-            n = 2;
-        }
-        int starts = StartsContraction(buf, buf + n);
-        int idx = GetDUCET(buf, buf + n);
-        s_latin_ce[cp] = 0;
-        s_latin_starter_ce[cp] = 0;
-        if (0 != idx) {
-            int start = ducet_ce_offset[idx];
-            int end   = ducet_ce_offset[idx + 1];
-            if (end - start == 1) {
-                if (starts) s_latin_starter_ce[cp] = ducet_ce_weights[start];
-                else        s_latin_ce[cp] = ducet_ce_weights[start];
-            }
-        }
-    }
-}
-
-#if defined(UTF_USE_ATOMICS)
-static void EnsureLatinCache(void)
-{
-    int state = atomic_load_explicit(&s_latin_ce_state, memory_order_acquire);
-    if (2 == state) return;
-
-    int expected = 0;
-    if (atomic_compare_exchange_strong_explicit(
-            &s_latin_ce_state, &expected, 1,
-            memory_order_acq_rel, memory_order_acquire)) {
-        InitLatinCache();
-        atomic_store_explicit(&s_latin_ce_state, 2, memory_order_release);
-        return;
-    }
-
-    while (1 != 0) {
-        state = atomic_load_explicit(&s_latin_ce_state, memory_order_acquire);
-        if (2 == state) return;
-    }
-}
-#else
-/* No atomics: no second thread either, so the CAS-and-spin collapses to a
- * plain flag.  The states are the same (0 unset, 2 ready); state 1 exists
- * only to park a racing thread, and there is none. */
-static void EnsureLatinCache(void)
-{
-    if (2 != s_latin_ce_state) {
-        InitLatinCache();
-        s_latin_ce_state = 2;
-    }
-}
-#endif
-
-/* The cached CE for Latin code point cp at p (ending at pNext) when cp
- * can start a contraction but none begins here; otherwise 0, sending the
- * caller to the full path.  Reached only on a 0 in s_latin_ce.
+/* The CE for Latin code point cp at p (ending at pNext) when cp can start a
+ * contraction but none begins here; otherwise 0, sending the caller to the
+ * full path.  Reached only on a 0 in latin_ce.
  */
-static uint32_t LatinStarterCE(uint32_t cp, const unsigned char *p,
+static uint32_t LatinStarterCE(const utf_collator *c, uint32_t cp,
+                               const unsigned char *p,
                                const unsigned char *pNext,
                                const unsigned char *pEnd)
 {
     const unsigned char *pMatchEnd;
-    uint32_t ce = s_latin_starter_ce[cp];
+    uint32_t ce = c->latin_starter_ce[cp];
     if (0 == ce || pNext >= pEnd) return ce;
-    if (0 != GetContraction3(p, pNext, pEnd, &pMatchEnd)) return 0;
-    if (0 != GetContraction(p, pNext, pNext, utf8_advance_c(pNext, pEnd))) return 0;
+    if (0 != GetContraction3(c, p, pNext, pEnd, &pMatchEnd)) return 0;
+    if (0 != GetContraction(c, p, pNext, pNext, utf8_advance_c(pNext, pEnd))) return 0;
     return ce;
 }
 
 /* --- CE collection (bounded fast path) --- */
 
-static int CollectCEsBounded(const unsigned char *src, size_t nSrc,
+static int CollectCEsBounded(const utf_collator *c,
+                             const unsigned char *src, size_t nSrc,
                              uint32_t *ces, int maxCEs, int *pOverflow)
 {
-    EnsureLatinCache();
+    const uint32_t *latin = c->latin_ce;
 
     const unsigned char *p = src;
     const unsigned char *pEnd = src + nSrc;
@@ -451,7 +355,7 @@ static int CollectCEsBounded(const unsigned char *src, size_t nSrc,
 
         /* ASCII fast path: single table lookup, no DFA. */
         if (*p < 0x80) {
-            uint32_t ce = s_latin_ce[*p];
+            uint32_t ce = latin[*p];
             if (0 != ce) {
                 ces[nCEs++] = ce;
                 p++;
@@ -462,7 +366,7 @@ static int CollectCEsBounded(const unsigned char *src, size_t nSrc,
         else if ((unsigned)(*p - 0xC2) <= (0xC5 - 0xC2)
                  && p + 1 < pEnd && (p[1] & 0xC0) == 0x80) {
             uint32_t cp = (uint32_t)((*p & 0x1F) << 6) | (p[1] & 0x3F);
-            uint32_t ce = s_latin_ce[cp];
+            uint32_t ce = latin[cp];
             if (0 != ce) {
                 ces[nCEs++] = ce;
                 p += 2;
@@ -491,7 +395,7 @@ static int CollectCEsBounded(const unsigned char *src, size_t nSrc,
         if (maxCEs - nCEs < MAX_CHAR_CES) {
             const unsigned char *probe = p;
             uint32_t tmp[MAX_CHAR_CES];
-            int nProbe = ExtractCEs(&probe, pEnd, tmp, MAX_CHAR_CES);
+            int nProbe = ExtractCEs(c, &probe, pEnd, tmp, MAX_CHAR_CES);
             if (nCEs + nProbe > maxCEs) {
                 *pOverflow = 1;
                 break;
@@ -500,13 +404,14 @@ static int CollectCEsBounded(const unsigned char *src, size_t nSrc,
             nCEs += nProbe;
             p = probe;
         } else {
-            nCEs += ExtractCEs(&p, pEnd, ces + nCEs, maxCEs - nCEs);
+            nCEs += ExtractCEs(c, &p, pEnd, ces + nCEs, maxCEs - nCEs);
         }
     }
     return nCEs;
 }
 
 typedef struct {
+    const utf_collator *c;
     const unsigned char *p;
     const unsigned char *pEnd;
     uint32_t ces[MAX_CHAR_CES];
@@ -514,8 +419,10 @@ typedef struct {
     int nCEs;
 } CEIterator;
 
-static void CEIteratorInit(CEIterator *it, const unsigned char *src, size_t nSrc)
+static void CEIteratorInit(CEIterator *it, const utf_collator *c,
+                           const unsigned char *src, size_t nSrc)
 {
+    it->c = c;
     it->p = src;
     it->pEnd = src + nSrc;
     it->iCE = 0;
@@ -540,18 +447,19 @@ static int CEIteratorNextWeight(CEIterator *it, int level, unsigned int *pWeight
             }
         }
         if (it->p >= it->pEnd) return 0;
-        it->nCEs = ExtractCEs(&it->p, it->pEnd, it->ces, MAX_CHAR_CES);
+        it->nCEs = ExtractCEs(it->c, &it->p, it->pEnd, it->ces, MAX_CHAR_CES);
         it->iCE = 0;
     }
 }
 
-static int CompareLevel(const unsigned char *a, size_t nA,
+static int CompareLevel(const utf_collator *c,
+                        const unsigned char *a, size_t nA,
                         const unsigned char *b, size_t nB,
                         int level)
 {
     CEIterator itA, itB;
-    CEIteratorInit(&itA, a, nA);
-    CEIteratorInit(&itB, b, nB);
+    CEIteratorInit(&itA, c, a, nA);
+    CEIteratorInit(&itB, c, b, nB);
 
     for (;;) {
         unsigned int wA, wB;
@@ -731,12 +639,13 @@ static void AppendByte(unsigned char *key, size_t nKeyMax, size_t *pPos,
     (*pPos)++;
 }
 
-static void AppendLevelSortKey(const unsigned char *src, size_t nSrc,
+static void AppendLevelSortKey(const utf_collator *c,
+                               const unsigned char *src, size_t nSrc,
                                unsigned char *key, size_t nKeyMax,
                                size_t *pPos, int level)
 {
     CEIterator it;
-    CEIteratorInit(&it, src, nSrc);
+    CEIteratorInit(&it, c, src, nSrc);
     for (;;) {
         unsigned int weight;
         if (!CEIteratorNextWeight(&it, level, &weight)) break;
@@ -759,24 +668,26 @@ static void AppendNFCTiebreak(const unsigned char *src, size_t nSrc,
 
 /* --- Latin fast-path comparison --- */
 
-/* Decode next Latin codepoint and return its cached CE.
- * Returns 0 if the byte is non-Latin or has no single-CE cache entry.
+/* Decode next Latin codepoint and return its CE from the collator's Latin
+ * tables.  Returns 0 if the byte is non-Latin or has no single-CE entry.
  */
-static inline uint32_t NextLatinCE(const unsigned char **pp,
-                                    const unsigned char *pEnd)
+static inline uint32_t NextLatinCE(const utf_collator *c,
+                                   const uint32_t *latin,
+                                   const unsigned char **pp,
+                                   const unsigned char *pEnd)
 {
     const unsigned char *p = *pp;
     if (*p < 0x80) {
-        uint32_t ce = s_latin_ce[*p];
-        if (0 == ce) ce = LatinStarterCE(*p, p, p + 1, pEnd);
+        uint32_t ce = latin[*p];
+        if (0 == ce) ce = LatinStarterCE(c, *p, p, p + 1, pEnd);
         if (0 != ce) *pp = p + 1;
         return ce;
     }
     if ((unsigned)(*p - 0xC2) <= (0xC5 - 0xC2)
         && p + 1 < pEnd && (p[1] & 0xC0) == 0x80) {
         uint32_t cp = (uint32_t)((*p & 0x1F) << 6) | (p[1] & 0x3F);
-        uint32_t ce = s_latin_ce[cp];
-        if (0 == ce) ce = LatinStarterCE(cp, p, p + 2, pEnd);
+        uint32_t ce = latin[cp];
+        if (0 == ce) ce = LatinStarterCE(c, cp, p, p + 2, pEnd);
         if (0 != ce) { *pp = p + 2; return ce; }
     }
     return 0;
@@ -791,11 +702,12 @@ static inline uint32_t NextLatinCE(const unsigned char **pp,
  * three-pass comparison reduces to a single element-by-element pass
  * with recorded secondary/tertiary differences.
  */
-static int FastLatinCmp(const unsigned char *a, size_t nA,
+static int FastLatinCmp(const utf_collator *c,
+                        const unsigned char *a, size_t nA,
                         const unsigned char *b, size_t nB,
                         int *pResult)
 {
-    EnsureLatinCache();
+    const uint32_t *latin = c->latin_ce;
 
     const unsigned char *pa = a, *paEnd = a + nA;
     const unsigned char *pb = b, *pbEnd = b + nB;
@@ -805,15 +717,15 @@ static int FastLatinCmp(const unsigned char *a, size_t nA,
         /* Skip a common ASCII prefix -- but not past a character that may
          * start a contraction, whose CEs depend on what follows it. */
         while (pa < paEnd && pb < pbEnd && *pa < 0x80 && *pa == *pb
-               && 0 != s_latin_ce[*pa]) {
+               && 0 != latin[*pa]) {
             pa++;
             pb++;
         }
         if (pa >= paEnd || pb >= pbEnd) break;
 
-        uint32_t ceA = NextLatinCE(&pa, paEnd);
+        uint32_t ceA = NextLatinCE(c, latin, &pa, paEnd);
         if (0 == ceA) return 0;
-        uint32_t ceB = NextLatinCE(&pb, pbEnd);
+        uint32_t ceB = NextLatinCE(c, latin, &pb, pbEnd);
         if (0 == ceB) return 0;
 
         unsigned short pA = CE_PRIMARY(ceA), pB = CE_PRIMARY(ceB);
@@ -833,11 +745,11 @@ static int FastLatinCmp(const unsigned char *a, size_t nA,
      * Any remaining characters have non-zero primary (Latin guarantee).
      */
     if (pa < paEnd) {
-        if (0 == NextLatinCE(&pa, paEnd)) return 0;
+        if (0 == NextLatinCE(c, latin, &pa, paEnd)) return 0;
         *pResult = 1; return 1;
     }
     if (pb < pbEnd) {
-        if (0 == NextLatinCE(&pb, pbEnd)) return 0;
+        if (0 == NextLatinCE(c, latin, &pb, pbEnd)) return 0;
         *pResult = -1; return 1;
     }
 
@@ -848,11 +760,12 @@ static int FastLatinCmp(const unsigned char *a, size_t nA,
     return 1;
 }
 
-static int FastLatinCmpCI(const unsigned char *a, size_t nA,
+static int FastLatinCmpCI(const utf_collator *c,
+                          const unsigned char *a, size_t nA,
                           const unsigned char *b, size_t nB,
                           int *pResult)
 {
-    EnsureLatinCache();
+    const uint32_t *latin = c->latin_ce;
 
     const unsigned char *pa = a, *paEnd = a + nA;
     const unsigned char *pb = b, *pbEnd = b + nB;
@@ -861,15 +774,15 @@ static int FastLatinCmpCI(const unsigned char *a, size_t nA,
         /* Skip a common ASCII prefix -- but not past a character that may
          * start a contraction, whose CEs depend on what follows it. */
         while (pa < paEnd && pb < pbEnd && *pa < 0x80 && *pa == *pb
-               && 0 != s_latin_ce[*pa]) {
+               && 0 != latin[*pa]) {
             pa++;
             pb++;
         }
         if (pa >= paEnd || pb >= pbEnd) break;
 
-        uint32_t ceA = NextLatinCE(&pa, paEnd);
+        uint32_t ceA = NextLatinCE(c, latin, &pa, paEnd);
         if (0 == ceA) return 0;
-        uint32_t ceB = NextLatinCE(&pb, pbEnd);
+        uint32_t ceB = NextLatinCE(c, latin, &pb, pbEnd);
         if (0 == ceB) return 0;
 
         unsigned short pA = CE_PRIMARY(ceA), pB = CE_PRIMARY(ceB);
@@ -880,11 +793,11 @@ static int FastLatinCmpCI(const unsigned char *a, size_t nA,
     }
 
     if (pa < paEnd) {
-        if (0 == NextLatinCE(&pa, paEnd)) return 0;
+        if (0 == NextLatinCE(c, latin, &pa, paEnd)) return 0;
         *pResult = 1; return 1;
     }
     if (pb < pbEnd) {
-        if (0 == NextLatinCE(&pb, pbEnd)) return 0;
+        if (0 == NextLatinCE(c, latin, &pb, pbEnd)) return 0;
         *pResult = -1; return 1;
     }
 
@@ -892,11 +805,12 @@ static int FastLatinCmpCI(const unsigned char *a, size_t nA,
     return 1;
 }
 
-static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
+static int FastLatinSortKey(const utf_collator *c,
+                            const unsigned char *src, size_t nSrc,
                             unsigned char *key, size_t nKeyMax,
                             size_t *pPosOut, int bCaseSensitive)
 {
-    EnsureLatinCache();
+    const uint32_t *latin = c->latin_ce;
     /* A local cursor, written back on success.  The caller's position has
        its address passed to out-of-line helpers on the full path, which
        would otherwise pin every append in these loops to memory. */
@@ -907,7 +821,7 @@ static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
     const unsigned char *pEnd = src + nSrc;
 
     while (p < pEnd) {
-        uint32_t ce = NextLatinCE(&p, pEnd);
+        uint32_t ce = NextLatinCE(c, latin, &p, pEnd);
         if (0 == ce) {
             return 0;
         }
@@ -917,7 +831,7 @@ static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
 
     p = src;
     while (p < pEnd) {
-        uint32_t ce = NextLatinCE(&p, pEnd);
+        uint32_t ce = NextLatinCE(c, latin, &p, pEnd);
         AppendBE16(key, nKeyMax, pPos, CE_SECONDARY(ce));
     }
 
@@ -925,7 +839,7 @@ static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
         AppendBE16(key, nKeyMax, pPos, 0);
         p = src;
         while (p < pEnd) {
-            uint32_t ce = NextLatinCE(&p, pEnd);
+            uint32_t ce = NextLatinCE(c, latin, &p, pEnd);
             if (0 == ce) {
                 return 0;
             }
@@ -940,19 +854,20 @@ static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
     return 1;
 }
 
-static int FastASCIISortKeyCI(const unsigned char *src, size_t nSrc,
+static int FastASCIISortKeyCI(const utf_collator *c,
+                              const unsigned char *src, size_t nSrc,
                               unsigned char *key, size_t nKeyMax,
                               size_t *pPosOut)
 {
-    EnsureLatinCache();
+    const uint32_t *latin = c->latin_ce;
     size_t pos = *pPosOut;          /* local cursor, as in FastLatinSortKey */
     size_t *pPos = &pos;
 
     int nStarters = 0;
     for (size_t i = 0; i < nSrc; i++) {
         if (src[i] >= 0x80) return 0;
-        if (0 == s_latin_ce[src[i]]) {
-            if (0 == LatinStarterCE(src[i], src + i, src + i + 1, src + nSrc))
+        if (0 == latin[src[i]]) {
+            if (0 == LatinStarterCE(c, src[i], src + i, src + i + 1, src + nSrc))
                 return 0;
             nStarters++;
         }
@@ -960,14 +875,15 @@ static int FastASCIISortKeyCI(const unsigned char *src, size_t nSrc,
 
     if (0 == nStarters) {
         for (size_t i = 0; i < nSrc; i++)
-            AppendBE16(key, nKeyMax, pPos, CE_PRIMARY(s_latin_ce[src[i]]));
+            AppendBE16(key, nKeyMax, pPos, CE_PRIMARY(latin[src[i]]));
         AppendBE16(key, nKeyMax, pPos, 0);
         for (size_t i = 0; i < nSrc; i++)
-            AppendBE16(key, nKeyMax, pPos, CE_SECONDARY(s_latin_ce[src[i]]));
+            AppendBE16(key, nKeyMax, pPos, CE_SECONDARY(latin[src[i]]));
     } else {
-        /* Every character checked out above: a 0 in s_latin_ce is a
+        /* Every character checked out above: a 0 in latin_ce is a
          * starter that does not contract here. */
-#define ASCII_CE(c) (s_latin_ce[c] ? s_latin_ce[c] : s_latin_starter_ce[c])
+        const uint32_t *starter = c->latin_starter_ce;
+#define ASCII_CE(ch) (latin[ch] ? latin[ch] : starter[ch])
         for (size_t i = 0; i < nSrc; i++)
             AppendBE16(key, nKeyMax, pPos, CE_PRIMARY(ASCII_CE(src[i])));
         AppendBE16(key, nKeyMax, pPos, 0);
@@ -979,24 +895,83 @@ static int FastASCIISortKeyCI(const unsigned char *src, size_t nSrc,
     return 1;
 }
 
+/* --- Collators --- */
+
+const utf_collator *utf_collator_root(void)
+{
+    return &utf_collators[0];
+}
+
+const char *utf_collator_name(const utf_collator *c)
+{
+    return (NULL == c) ? utf_collators[0].name : c->name;
+}
+
+/* ASCII-only, so no locale's idea of case can interfere. */
+static unsigned char AsciiLower(unsigned char ch)
+{
+    return (ch >= 'A' && ch <= 'Z') ? (unsigned char)(ch - 'A' + 'a') : ch;
+}
+
+/* Does registry name `name` equal the n-byte canonical id in buf? */
+static int NameIs(const char *name, const char *buf, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++) {
+        if ('\0' == name[i] || AsciiLower((unsigned char)name[i]) != (unsigned char)buf[i])
+            return 0;
+    }
+    return '\0' == name[i];
+}
+
+const utf_collator *utf_collator_find(const char *locale)
+{
+    char buf[64];
+    size_t n = 0;
+
+    if (NULL == locale) return &utf_collators[0];
+
+    /* Canonicalize: lower case, '-' as '_', and stop at a POSIX codeset or
+     * modifier ("sv_SE.UTF-8", "de_DE@euro"). */
+    for (const char *p = locale; '\0' != *p && '.' != *p && '@' != *p; p++) {
+        if (n == sizeof(buf)) return NULL;
+        buf[n++] = ('-' == *p) ? '_' : (char)AsciiLower((unsigned char)*p);
+    }
+
+    /* Then try the whole id and each shorter prefix, dropping a trailing
+     * subtag at a time: "de_at_1996", "de_at", "de". */
+    for (;;) {
+        if (0 == n || (3 == n && 0 == memcmp(buf, "und", 3)))
+            return &utf_collators[0];
+        for (int i = 0; i < UTF_COLLATOR_COUNT; i++) {
+            if (NameIs(utf_collators[i].name, buf, n)) return &utf_collators[i];
+        }
+        while (n > 0 && '_' != buf[n - 1]) n--;
+        if (0 == n) return NULL;
+        n--;                            /* the '_' itself */
+    }
+}
+
 /* --- Public API --- */
 
-int utf_collate_cmp(const unsigned char *a, size_t nA,
-                    const unsigned char *b, size_t nB)
+int utf_collate_cmp_l(const unsigned char *a, size_t nA,
+                      const unsigned char *b, size_t nB,
+                      const utf_collator *c)
 {
+    if (NULL == c) c = &utf_collators[0];
     if (nA == nB && (a == b || 0 == memcmp(a, b, nA)))
         return 0;
 
     /* Fast path: Latin-only strings compared inline. */
     int fastResult;
-    if (FastLatinCmp(a, nA, b, nB, &fastResult))
+    if (FastLatinCmp(c, a, nA, b, nB, &fastResult))
         return fastResult;
 
     {
         uint32_t cesA[MAX_CMP_CES], cesB[MAX_CMP_CES];
         int overflowA, overflowB;
-        int nCEsA = CollectCEsBounded(a, nA, cesA, MAX_CMP_CES, &overflowA);
-        int nCEsB = CollectCEsBounded(b, nB, cesB, MAX_CMP_CES, &overflowB);
+        int nCEsA = CollectCEsBounded(c, a, nA, cesA, MAX_CMP_CES, &overflowA);
+        int nCEsB = CollectCEsBounded(c, b, nB, cesB, MAX_CMP_CES, &overflowB);
 
         if (!overflowA && !overflowB) {
             int cmp = ComparePrimaryBuffered(cesA, nCEsA, cesB, nCEsB);
@@ -1009,11 +984,11 @@ int utf_collate_cmp(const unsigned char *a, size_t nA,
         }
     }
 
-    int cmp = CompareLevel(a, nA, b, nB, 1);
+    int cmp = CompareLevel(c, a, nA, b, nB, 1);
     if (0 != cmp) return cmp;
-    cmp = CompareLevel(a, nA, b, nB, 2);
+    cmp = CompareLevel(c, a, nA, b, nB, 2);
     if (0 != cmp) return cmp;
-    cmp = CompareLevel(a, nA, b, nB, 3);
+    cmp = CompareLevel(c, a, nA, b, nB, 3);
     if (0 != cmp) return cmp;
 
     /* Tiebreaker: binary comparison of NFC-normalized forms.
@@ -1028,23 +1003,25 @@ int utf_collate_cmp(const unsigned char *a, size_t nA,
     return CompareNFCTiebreak(a, nA, b, nB);
 }
 
-int utf_collate_cmp_ci(const unsigned char *a, size_t nA,
-                       const unsigned char *b, size_t nB)
+int utf_collate_cmp_ci_l(const unsigned char *a, size_t nA,
+                         const unsigned char *b, size_t nB,
+                         const utf_collator *c)
 {
+    if (NULL == c) c = &utf_collators[0];
     if (nA == nB && (a == b || 0 == memcmp(a, b, nA)))
         return 0;
 
     {
         int fastResult;
-        if (FastLatinCmpCI(a, nA, b, nB, &fastResult))
+        if (FastLatinCmpCI(c, a, nA, b, nB, &fastResult))
             return fastResult;
     }
 
     {
         uint32_t cesA[MAX_CMP_CES], cesB[MAX_CMP_CES];
         int overflowA, overflowB;
-        int nCEsA = CollectCEsBounded(a, nA, cesA, MAX_CMP_CES, &overflowA);
-        int nCEsB = CollectCEsBounded(b, nB, cesB, MAX_CMP_CES, &overflowB);
+        int nCEsA = CollectCEsBounded(c, a, nA, cesA, MAX_CMP_CES, &overflowA);
+        int nCEsB = CollectCEsBounded(c, b, nB, cesB, MAX_CMP_CES, &overflowB);
 
         if (!overflowA && !overflowB) {
             int cmp = ComparePrimaryBuffered(cesA, nCEsA, cesB, nCEsB);
@@ -1053,22 +1030,24 @@ int utf_collate_cmp_ci(const unsigned char *a, size_t nA,
         }
     }
 
-    int cmp = CompareLevel(a, nA, b, nB, 1);
+    int cmp = CompareLevel(c, a, nA, b, nB, 1);
     if (0 != cmp) return cmp;
-    return CompareLevel(a, nA, b, nB, 2);
+    return CompareLevel(c, a, nA, b, nB, 2);
 }
 
-size_t utf_collate_sortkey(const unsigned char *src, size_t nSrc,
-                           unsigned char *key, size_t nKeyMax)
+size_t utf_collate_sortkey_l(const unsigned char *src, size_t nSrc,
+                             unsigned char *key, size_t nKeyMax,
+                             const utf_collator *c)
 {
+    if (NULL == c) c = &utf_collators[0];
     size_t pos = 0;
 
-    if (FastLatinSortKey(src, nSrc, key, nKeyMax, &pos, 1))
+    if (FastLatinSortKey(c, src, nSrc, key, nKeyMax, &pos, 1))
         return (pos < nKeyMax) ? pos : nKeyMax;
 
     uint32_t ces[MAX_SORTKEY_CES];
     int overflow;
-    int nCEs = CollectCEsBounded(src, nSrc, ces, MAX_SORTKEY_CES, &overflow);
+    int nCEs = CollectCEsBounded(c, src, nSrc, ces, MAX_SORTKEY_CES, &overflow);
 
     if (!overflow) {
         for (int i = 0; i < nCEs; i++) {
@@ -1089,26 +1068,28 @@ size_t utf_collate_sortkey(const unsigned char *src, size_t nSrc,
         return (pos < nKeyMax) ? pos : nKeyMax;
     }
 
-    AppendLevelSortKey(src, nSrc, key, nKeyMax, &pos, 1);
+    AppendLevelSortKey(c, src, nSrc, key, nKeyMax, &pos, 1);
     AppendBE16(key, nKeyMax, &pos, 0);
-    AppendLevelSortKey(src, nSrc, key, nKeyMax, &pos, 2);
+    AppendLevelSortKey(c, src, nSrc, key, nKeyMax, &pos, 2);
     AppendBE16(key, nKeyMax, &pos, 0);
-    AppendLevelSortKey(src, nSrc, key, nKeyMax, &pos, 3);
+    AppendLevelSortKey(c, src, nSrc, key, nKeyMax, &pos, 3);
     AppendNFCTiebreak(src, nSrc, key, nKeyMax, &pos);
     return (pos < nKeyMax) ? pos : nKeyMax;
 }
 
-size_t utf_collate_sortkey_ci(const unsigned char *src, size_t nSrc,
-                              unsigned char *key, size_t nKeyMax)
+size_t utf_collate_sortkey_ci_l(const unsigned char *src, size_t nSrc,
+                                unsigned char *key, size_t nKeyMax,
+                                const utf_collator *c)
 {
+    if (NULL == c) c = &utf_collators[0];
     size_t pos = 0;
 
-    if (FastASCIISortKeyCI(src, nSrc, key, nKeyMax, &pos))
+    if (FastASCIISortKeyCI(c, src, nSrc, key, nKeyMax, &pos))
         return (pos < nKeyMax) ? pos : nKeyMax;
 
     uint32_t ces[MAX_SORTKEY_CES];
     int overflow;
-    int nCEs = CollectCEsBounded(src, nSrc, ces, MAX_SORTKEY_CES, &overflow);
+    int nCEs = CollectCEsBounded(c, src, nSrc, ces, MAX_SORTKEY_CES, &overflow);
 
     if (!overflow) {
         for (int i = 0; i < nCEs; i++) {
@@ -1123,8 +1104,34 @@ size_t utf_collate_sortkey_ci(const unsigned char *src, size_t nSrc,
         return (pos < nKeyMax) ? pos : nKeyMax;
     }
 
-    AppendLevelSortKey(src, nSrc, key, nKeyMax, &pos, 1);
+    AppendLevelSortKey(c, src, nSrc, key, nKeyMax, &pos, 1);
     AppendBE16(key, nKeyMax, &pos, 0);
-    AppendLevelSortKey(src, nSrc, key, nKeyMax, &pos, 2);
+    AppendLevelSortKey(c, src, nSrc, key, nKeyMax, &pos, 2);
     return (pos < nKeyMax) ? pos : nKeyMax;
+}
+
+/* The original entry points are root collation. */
+
+int utf_collate_cmp(const unsigned char *a, size_t nA,
+                    const unsigned char *b, size_t nB)
+{
+    return utf_collate_cmp_l(a, nA, b, nB, NULL);
+}
+
+int utf_collate_cmp_ci(const unsigned char *a, size_t nA,
+                       const unsigned char *b, size_t nB)
+{
+    return utf_collate_cmp_ci_l(a, nA, b, nB, NULL);
+}
+
+size_t utf_collate_sortkey(const unsigned char *src, size_t nSrc,
+                           unsigned char *key, size_t nKeyMax)
+{
+    return utf_collate_sortkey_l(src, nSrc, key, nKeyMax, NULL);
+}
+
+size_t utf_collate_sortkey_ci(const unsigned char *src, size_t nSrc,
+                              unsigned char *key, size_t nKeyMax)
+{
+    return utf_collate_sortkey_ci_l(src, nSrc, key, nKeyMax, NULL);
 }

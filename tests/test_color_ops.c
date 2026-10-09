@@ -4530,6 +4530,145 @@ static void fp_check(const char *name, const char *label,
 
 /* --- 2. Content fingerprints --- */
 
+/* ---- Collators ---- */
+
+/* Run a compressed DUCET-family DFA from state s over [p, pEnd); returns the
+ * final state, which is accepting once >= acceptStart. */
+static int run_collate_dfa(const unsigned char *itt, const unsigned short *sot,
+                           const unsigned short *sbt, int acceptStart, int s,
+                           const unsigned char *p, const unsigned char *pEnd) {
+    while (p < pEnd && s < acceptStart) {
+        int col = itt[*p++], off = sot[s];
+        for (;;) {
+            int y = sbt[off];
+            if (y < 128) {
+                if (col < y) { s = sbt[off + 1]; break; }
+                col -= y; off += 2;
+            } else {
+                y = 256 - y;
+                if (col < y) { s = sbt[off + col + 1]; break; }
+                col -= y; off += y + 1;
+            }
+        }
+    }
+    return s;
+}
+
+/* The Latin fast-path tables are generated, so check them against the DFAs
+ * they shortcut: a code point gets its CE when DUCET gives it exactly one,
+ * in the starter table when it can begin a contraction. */
+static void test_collate_latin_tables(void) {
+    const char *name = "collate_latin_tables";
+    const utf_collator *root = utf_collator_root();
+    int bad = 0;
+
+    for (unsigned int cp = 0; cp < DUCET_LATIN_LIMIT; cp++) {
+        unsigned char b[4];
+        size_t n = cls_enc(cp, b);
+        int s = run_collate_dfa(tr_ducet_itt, tr_ducet_sot, tr_ducet_sbt,
+                                TR_DUCET_ACCEPTING_STATES_START,
+                                root->ducet_start, b, b + n);
+        int idx = (s >= TR_DUCET_ACCEPTING_STATES_START)
+                ? s - TR_DUCET_ACCEPTING_STATES_START : 0;
+        uint32_t ce = 0;
+        if (0 != idx && 1 == ducet_ce_offset[idx + 1] - ducet_ce_offset[idx])
+            ce = ducet_ce_weights[ducet_ce_offset[idx]];
+        int starts = run_collate_dfa(tr_ducet_contract_itt, tr_ducet_contract_sot,
+                                     tr_ducet_contract_sbt,
+                                     TR_DUCET_CONTRACT_ACCEPTING_STATES_START,
+                                     root->contract_start, b, b + n)
+                   < TR_DUCET_CONTRACT_ACCEPTING_STATES_START;
+        for (int i = 0; i < root->n_contract3; i++)
+            if (root->contract3[i].cp1 == cp) starts = 1;
+        if (root->latin_ce[cp] != (starts ? 0 : ce)
+            || root->latin_starter_ce[cp] != (starts ? ce : 0)) {
+            if (bad++ < 5) test_fail(name, "U+%04X: latin %08X starter %08X, DFA says %08X%s",
+                                     cp, root->latin_ce[cp], root->latin_starter_ce[cp],
+                                     ce, starts ? " (starter)" : "");
+        }
+    }
+    check_size(name, "Latin tables agree with the DFAs", (size_t)bad, 0);
+    check_size(name, "l and L are the starters",
+               (size_t)(0 != root->latin_starter_ce['l'] && 0 != root->latin_starter_ce['L']
+                        && 0 == root->latin_ce['l'] && 0 == root->latin_ce['L']), 1);
+}
+
+static void test_collator_api(void) {
+    const char *name = "collator_api";
+    const utf_collator *root = utf_collator_root();
+
+    check_size(name, "root is utf_collators[0]", (size_t)(root == &utf_collators[0]), 1);
+    check_size(name, "root is named root",
+               (size_t)(0 == strcmp(utf_collator_name(root), "root")), 1);
+    check_size(name, "NULL names root",
+               (size_t)(0 == strcmp(utf_collator_name(NULL), "root")), 1);
+
+    /* Spellings of root: registry name, BCP 47 und with subtags dropped one
+     * at a time, POSIX codeset and modifier stripped, any case. */
+    static const char *const roots[] = {
+        "root", "ROOT", "Root", "und", "UND", "und-Latn", "und_Latn_US",
+        "und-Latn-US-u-co-standard", "root.UTF-8", "und@euro", "",
+    };
+    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); i++) {
+        if (utf_collator_find(roots[i]) == root) test_ok(name, "\"%s\" is root", roots[i]);
+        else test_fail(name, "\"%s\" should find root", roots[i]);
+    }
+    check_size(name, "NULL finds root", (size_t)(utf_collator_find(NULL) == root), 1);
+
+    /* No locale is tailored in this build, so anything else finds nothing --
+     * a locale with no ordering here is not silently given root's.  The
+     * POSIX "C" locale orders bytes, not UCA, so it is not root either. */
+    static const char *const none[] = {
+        "sv", "sv-SE", "de_AT", "C", "POSIX", "x", "rootx", "unde",
+    };
+    for (size_t i = 0; i < sizeof(none) / sizeof(none[0]); i++) {
+        const utf_collator *c = utf_collator_find(none[i]);
+        if (NULL == c) test_ok(name, "\"%s\" finds no tailoring", none[i]);
+        else test_fail(name, "\"%s\" found \"%s\"", none[i], utf_collator_name(c));
+    }
+
+    /* Longer than the canonicalization buffer: refused, not overrun. */
+    {
+        char longName[200];
+        memset(longName, 'a', sizeof(longName) - 1);
+        longName[sizeof(longName) - 1] = '\0';
+        check_size(name, "over-long name finds nothing",
+                   (size_t)(NULL == utf_collator_find(longName)), 1);
+    }
+
+    /* The _l forms with root, or NULL, are the plain functions. */
+    static const char *const s[] = {
+        "", "a", "A", "b", "l", "L\xC2\xB7", "L!", "col\xC2\xB7lecci\xC3\xB3", "colm",
+        "Caf\xC3\xA9", "cafe\xCC\x81", "\xE4\xB8\xAD\xE6\x96\x87", "\xCE\xB1\xCE\xB2",
+        "a\xE0\xBE\xB2\xE0\xBD\xB1\xE0\xBE\x80", "\xF0\x9F\x98\x80", "\xFF\xFE",
+    };
+    int bad = 0;
+    for (size_t i = 0; i < sizeof(s) / sizeof(s[0]); i++) {
+        const unsigned char *a = (const unsigned char *)s[i];
+        size_t na = strlen(s[i]);
+        unsigned char k0[256], k1[256], k2[256];
+        size_t n0 = utf_collate_sortkey(a, na, k0, sizeof(k0));
+        size_t n1 = utf_collate_sortkey_l(a, na, k1, sizeof(k1), root);
+        size_t n2 = utf_collate_sortkey_l(a, na, k2, sizeof(k2), NULL);
+        if (n0 != n1 || n0 != n2 || memcmp(k0, k1, n0) || memcmp(k0, k2, n0)) bad++;
+        n0 = utf_collate_sortkey_ci(a, na, k0, sizeof(k0));
+        n1 = utf_collate_sortkey_ci_l(a, na, k1, sizeof(k1), root);
+        n2 = utf_collate_sortkey_ci_l(a, na, k2, sizeof(k2), NULL);
+        if (n0 != n1 || n0 != n2 || memcmp(k0, k1, n0) || memcmp(k0, k2, n0)) bad++;
+        for (size_t j = 0; j < sizeof(s) / sizeof(s[0]); j++) {
+            const unsigned char *b = (const unsigned char *)s[j];
+            size_t nb = strlen(s[j]);
+            int c0 = utf_collate_cmp(a, na, b, nb);
+            if (c0 != utf_collate_cmp_l(a, na, b, nb, root)
+                || c0 != utf_collate_cmp_l(a, na, b, nb, NULL)) bad++;
+            c0 = utf_collate_cmp_ci(a, na, b, nb);
+            if (c0 != utf_collate_cmp_ci_l(a, na, b, nb, root)
+                || c0 != utf_collate_cmp_ci_l(a, na, b, nb, NULL)) bad++;
+        }
+    }
+    check_size(name, "_l with root or NULL matches the plain forms", (size_t)bad, 0);
+}
+
 static void test_table_content(void) {
     const char *name = "table_content";
     uint64_t h;
@@ -4713,6 +4852,8 @@ static const test_suite_t suites[] = {
     { "console_width",    test_console_width },
     { "collate_nfc_tiebreak", test_collate_nfc_tiebreak },
     { "collate_contractions", test_collate_contractions },
+    { "collate_latin_tables", test_collate_latin_tables },
+    { "collator_api",     test_collator_api },
     { "classify_word",    test_classify_word },
     { "classify_connector", test_classify_connector },
     { "classify_census",  test_classify_census },

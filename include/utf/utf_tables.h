@@ -188,6 +188,30 @@ typedef struct {
 #define DUCET_CONTRACT3_COUNT 8
 extern const utf_ducet_contract3 ducet_contract3[DUCET_CONTRACT3_COUNT];
 
+/* Latin fast path, U+0000..U+017F (from ducet_cetable): the CE of each code
+ * point that has exactly one, else 0.  A code point that can start a
+ * contraction is 0 in ducet_latin_ce and has its CE in
+ * ducet_latin_starter_ce, good only when no contraction follows it. */
+#define DUCET_LATIN_LIMIT 0x180
+extern const uint32_t ducet_latin_ce[DUCET_LATIN_LIMIT];
+extern const uint32_t ducet_latin_starter_ce[DUCET_LATIN_LIMIT];
+
+/* A collator is one locale's view of the shared DUCET tables: where it
+ * starts in each DFA, its three-code-point contractions, and its Latin
+ * fast-path tables.  collate.h hands it out as an opaque utf_collator.
+ * utf_collators[0] is root. */
+struct utf_collator {
+    const char *name;
+    int ducet_start;                    /* start state in tr_ducet */
+    int contract_start;                 /* start state in tr_ducet_contract */
+    const utf_ducet_contract3 *contract3;
+    int n_contract3;
+    const uint32_t *latin_ce;           /* [DUCET_LATIN_LIMIT] */
+    const uint32_t *latin_starter_ce;   /* [DUCET_LATIN_LIMIT] */
+};
+#define UTF_COLLATOR_COUNT 1
+extern const struct utf_collator utf_collators[UTF_COLLATOR_COUNT];
+
 /* ---- Charset approximation DFAs ---- */
 
 /* tr_ascii: UTF-8 to ASCII approximation */

@@ -5,7 +5,8 @@ Outputs (paths relative to this script):
   data/tr_ducet.txt            CODEPOINT;CE_INDEX       (input to integers)
   data/tr_ducet_contract.txt   CP1 CP2;CE_INDEX (hex)   (input to pairs)
   ../tables/ducet_cetable.c    CE weights and offsets, three-code-point
-                               contractions
+                               contractions, the Latin fast-path tables and
+                               the collator registry
 
 CE index 0 is reserved for "not in DUCET -- use implicit weights"; real CE
 sequences are numbered from 1 in the order allkeys.txt first uses them.
@@ -42,6 +43,7 @@ COMMON_SECONDARY = 0x0020
 COMMON_TERTIARY = 0x0002
 SECONDARY_BITS = 9
 TERTIARY_BITS = 7
+LATIN_LIMIT = 0x180     # U+0000..U+017F: Basic Latin through Latin Extended-A
 
 
 def parse_allkeys(path):
@@ -120,6 +122,19 @@ def main():
     if offsets[-1] > 0xFFFF:
         sys.exit('ducet_ce_offset no longer fits unsigned short')
 
+    # Latin fast path: the single CE of each U+0000..U+017F that has exactly
+    # one.  A code point that can start a contraction keeps its CE apart, in
+    # the starter table, since it holds only when no contraction follows.
+    starters = {cps[0] for cps, _ in pairs} | {cps[0] for cps, _ in triples}
+    seq_of = {cp: ces for cps, ces in entries if len(cps) == 1 for cp in cps}
+    latin_ce = [0] * LATIN_LIMIT
+    latin_starter_ce = [0] * LATIN_LIMIT
+    for cp in range(LATIN_LIMIT):
+        ces = seq_of.get(cp)
+        if ces is None or len(ces) != 1:
+            continue
+        (latin_starter_ce if cp in starters else latin_ce)[cp] = pack(ces[0], maps)
+
     out = []
     w = out.append
     w('/* ducet_cetable.c -- DUCET CE weight/offset tables.\n'
@@ -165,7 +180,30 @@ def main():
     w('const utf_ducet_contract3 ducet_contract3[%d] =\n{\n' % len(triples))
     for (a, b, c), idx in triples:
         w('    { 0x%04X, 0x%04X, 0x%04X, %d },\n' % (a, b, c, idx))
+    w('};\n\n')
+
+    w('/* Latin fast path, U+0000..U+017F: the CE of each code point that has\n'
+      ' * exactly one, else 0.  A code point that can start a contraction is 0\n'
+      ' * in the first table and has its CE in the second, good only when no\n'
+      ' * contraction follows it. */\n')
+    for name, table in (('ducet_latin_ce', latin_ce),
+                        ('ducet_latin_starter_ce', latin_starter_ce)):
+        w('const uint32_t %s[DUCET_LATIN_LIMIT] =\n{\n' % name)
+        for i in range(0, LATIN_LIMIT, 8):
+            row = ','.join('0x%08X' % v for v in table[i:i + 8])
+            w('    %s%s\n' % (row, ',' if i + 8 < LATIN_LIMIT else ''))
+        w('};\n\n')
+    w('_Static_assert(DUCET_LATIN_LIMIT == 0x%X, "Latin range changed");\n\n' % LATIN_LIMIT)
+
+    w('/* Collators: each is a view of the shared tables above -- its start\n'
+      ' * states in the DFAs, its three-code-point contractions and its Latin\n'
+      ' * fast-path tables.  utf_collators[0] is root. */\n')
+    w('const struct utf_collator utf_collators[UTF_COLLATOR_COUNT] =\n{\n')
+    w('    { "root", TR_DUCET_START_STATE, TR_DUCET_CONTRACT_START_STATE,\n'
+      '      ducet_contract3, DUCET_CONTRACT3_COUNT,\n'
+      '      ducet_latin_ce, ducet_latin_starter_ce },\n')
     w('};\n')
+    w('_Static_assert(UTF_COLLATOR_COUNT == 1, "collator count changed");\n')
 
     with open(os.path.join(TABLES, 'ducet_cetable.c'), 'w') as f:
         f.write(''.join(out))

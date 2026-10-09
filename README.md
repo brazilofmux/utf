@@ -20,7 +20,7 @@ cd utf && make && make test
 | Grapheme | `grapheme.h` | Extended Grapheme Cluster segmentation (UAX #29) — emoji ZWJ, regional indicators, Hangul |
 | NFC | `nfc.h` | Canonical normalization (UAX #15) with Hangul algorithmic composition |
 | Classify | `classify.h` | Word-character membership (Alphabetic + Nd + Mn + Mc), connector punctuation |
-| Collation | `collate.h` | DUCET sort (UTS #10) — multi-level comparison, case-insensitive comparison, and binary sort keys |
+| Collation | `collate.h` | DUCET sort (UTS #10) — multi-level comparison, case-insensitive comparison, and binary sort keys; each also takes a collator (`_l` forms, root today) |
 | Tables | `utf_tables.h` | Compressed DFA tables for case mapping, character width, GCB, charset approximation |
 
 ## Performance vs ICU 78.3
@@ -83,11 +83,11 @@ as a reference implementation:
   — plus a 100,000-input randomized differential fuzz and 2,000
   long-repeated-run comparisons.  All match ICU byte-for-byte.
 
-- **Collation**: 53 test cases.  33 compare directly against ICU
+- **Collation**: 61 test cases.  39 compare directly against ICU
   across primary (base character), secondary (accent), and tertiary
-  (case) weight levels — all match ICU.  20 additional cases verify
-  sort key consistency, case-insensitive comparison, long-string
-  overflow, and malformed UTF-8 resilience.
+  (case) weight levels, and through contractions — all match ICU.  22
+  additional cases verify sort key consistency, case-insensitive
+  comparison, long-string overflow, and malformed UTF-8 resilience.
 
 Tests are in `tests/test_nfc_icu.c` and `tests/test_collate_icu.c`.
 Build with ICU development headers to run them.
@@ -123,10 +123,9 @@ XYZ D65 → CIELAB) and searches a pre-built Kd-tree that cycles through
 L\*, a\*, b\* axes.  This gives perceptually accurate nearest-color
 results instead of the Euclidean-in-RGB approximation most terminals use.
 
-**No malloc.**  All DFA tables are `const`.  All functions write to
-caller-provided buffers.  A small ASCII collation-element cache is
-lazily initialized on first use; all other state is immutable.
-Thread-safe by construction.
+**No malloc.**  All tables are `const`, the collators and their Latin
+fast-path tables included, and nothing is initialized lazily.  All
+functions write to caller-provided buffers.  Thread-safe by construction.
 
 ## Usage
 
@@ -136,7 +135,7 @@ Link against `libutf.a` and `#include` the headers you need:
 #include "utf/color_ops.h"   /* co_toupper, co_render_ansi256, ... */
 #include "utf/nfc.h"         /* utf_nfc_normalize, utf_nfc_is_nfc */
 #include "utf/classify.h"    /* utf_is_word, utf_is_word_connector */
-#include "utf/collate.h"     /* utf_collate_cmp, utf_collate_cmp_ci, utf_collate_sortkey */
+#include "utf/collate.h"     /* utf_collate_cmp, utf_collate_sortkey, utf_collator_find, ..._l */
 #include "utf/grapheme.h"    /* utf_grapheme_next, utf_grapheme_count */
 #include "utf/cie97.h"       /* co_nearest_xterm256, co_nearest_xterm16 */
 ```
