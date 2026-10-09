@@ -84,7 +84,7 @@ cl_ExtPict.txt: gen_extpict.pl emoji-data.txt
 cl_Word.txt: gen_word.pl DerivedCoreProperties.txt UnicodeData.txt
 	perl gen_word.pl > cl_Word.txt
 
-tr_ducet.txt tr_ducet_contract.txt ../tables/ducet_cetable.c: gen_ducet.py allkeys.txt
+tr_ducet.txt tr_ducet_contract.txt ../tables/ducet_cetable.c ../tables/ducet_dfa_tables.c: gen_ducet.py cldr_tailor.py dfa_pool.py allkeys.txt UnicodeData.txt Scripts.txt
 	python3 gen_ducet.py
 
 # --- C++ tables (libmux.so) ---

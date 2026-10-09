@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 make              # build libutf.a
-make test         # build and run all 548 tests
+make test         # build and run all 601 tests
 make examples     # build example programs in examples/
 make ragel        # regenerate src/color_ops.c from src/color_ops.rl (requires Ragel)
 make clean        # remove all build artifacts
@@ -34,13 +34,13 @@ Colors are encoded as Unicode Private Use Area codepoints inline in UTF-8 string
 - **`src/{cie97,collate,grapheme,nfc,console_width,classify}.c`** — Hand-written implementations for each module.
 - **`include/utf/`** — Public API headers.
 - **`tables/`** — Pre-generated compressed DFA tables in C. These are large generated files; modify via the `gen/` pipeline, not by hand.
-- **`gen/`** — Table generation pipeline (C++ DFA builders + Perl scripts + Unicode 16.0 data files). Only needed when updating Unicode version. `gen/gen_ducet.py` (Python 3) writes `tables/ducet_cetable.c` directly; its `_Static_assert`s pin the CE packing and common weights to `utf_tables.h`.
+- **`gen/`** — Table generation pipeline (C++ DFA builders + Perl scripts + Unicode 16.0 data files). Only needed when updating Unicode version. `gen/gen_ducet.py` (Python 3) builds all collation tables -- DUCET plus the CLDR 46 European locale tailorings -- into `tables/ducet_*.c` and rewrites the DUCET section of `utf_tables.h`; its `_Static_assert`s pin the CE packing and common weights. Objects depend on the headers in the Makefile, because a stale object reads regenerated tables at the wrong offsets without any error.
 
 ### Key build notes
 
 - `src/color_ops.o` is compiled with `-Wno-implicit-fallthrough -Wno-unused-const-variable` because Ragel -G2 generates intentional fallthroughs.
 - The library links with `-lm` (math library, needed by CIE97 color distance).
-- There is one test file (`tests/test_color_ops.c`) containing all 548 tests with built-in fuzz testing.
+- There is one test file (`tests/test_color_ops.c`) containing all 601 tests with built-in fuzz testing.
 
 ### Table fingerprints
 

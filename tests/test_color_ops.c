@@ -3225,6 +3225,10 @@ static void check_order(const char *name, const char *label,
     }
 }
 
+static int run_collate_dfa(const unsigned char *itt, const unsigned short *sot,
+                           const unsigned short *sbt, int acceptStart, int s,
+                           const unsigned char *p, const unsigned char *pEnd);
+
 static void test_collate_contractions(void) {
     const char *name = "collate_contractions";
     unsigned char key[64], keyL[64];
@@ -3265,21 +3269,41 @@ static void test_collate_contractions(void) {
                                                     (const unsigned char *)au2, strlen(au2))), 1);
     }
 
-    /* ExtractCEs tries the three-code-point table only behind the
-     * contraction DFA's lead-byte gate, so every three-code-point
-     * contraction must also start a two-code-point one. */
+    /* ExtractCEs looks for a contraction only behind one of the collator's
+     * contract_leads, so every byte that could begin one must be in the
+     * set: each longer contraction's lead byte, and each byte after which
+     * the collator's contraction DFA has not yet ruled one out.  And
+     * GetLongContraction binary-searches the longer ones, so each list must
+     * be sorted by first code point, longest first. */
     {
-        int gated = 1;
-        for (int i = 0; i < DUCET_CONTRACT3_COUNT; i++) {
-            unsigned char b[4];
-            uint32_t cp = ducet_contract3[i].cp1;
-            b[0] = (cp < 0x80) ? (unsigned char)cp
-                 : (cp < 0x800) ? (unsigned char)(0xC0 | (cp >> 6))
-                 : (cp < 0x10000) ? (unsigned char)(0xE0 | (cp >> 12))
-                 : (unsigned char)(0xF0 | (cp >> 18));
-            if (0 == tr_ducet_contract_itt[b[0]]) gated = 0;
+        int gated = 1, sorted = 1;
+        for (int k = 0; k < UTF_COLLATOR_COUNT; k++) {
+            const utf_collator *c = &utf_collators[k];
+#define IN_LEADS(b) (0 != (c->contract_leads[(b) >> 3] & (1u << ((b) & 7))))
+            for (unsigned int b = 0; b < 256; b++) {
+                const unsigned char byte = (unsigned char)b;
+                int s = run_collate_dfa(tr_ducet_contract_itt, tr_ducet_contract_sot,
+                                        tr_ducet_contract_sbt,
+                                        TR_DUCET_CONTRACT_ACCEPTING_STATES_START,
+                                        c->contract_start, &byte, &byte + 1);
+                if (s < TR_DUCET_CONTRACT_ACCEPTING_STATES_START && !IN_LEADS(b)) gated = 0;
+            }
+            for (int i = 0; i < c->n_contractions; i++) {
+                uint32_t cp = c->contractions[i].cp[0];
+                unsigned char lead = (cp < 0x80) ? (unsigned char)cp
+                     : (cp < 0x800) ? (unsigned char)(0xC0 | (cp >> 6))
+                     : (cp < 0x10000) ? (unsigned char)(0xE0 | (cp >> 12))
+                     : (unsigned char)(0xF0 | (cp >> 18));
+                if (!IN_LEADS(lead)) gated = 0;
+                if (i > 0 && (c->contractions[i - 1].cp[0] > cp
+                              || (c->contractions[i - 1].cp[0] == cp
+                                  && c->contractions[i - 1].n < c->contractions[i].n)))
+                    sorted = 0;
+            }
         }
-        check_size(name, "contract3 starters pass the lead-byte gate", (size_t)gated, 1);
+#undef IN_LEADS
+        check_size(name, "every contraction's lead byte is in its collator's set", (size_t)gated, 1);
+        check_size(name, "long contractions sorted, longest first", (size_t)sorted, 1);
     }
 }
 
@@ -4557,11 +4581,27 @@ static int run_collate_dfa(const unsigned char *itt, const unsigned short *sot,
 /* The Latin fast-path tables are generated, so check them against the DFAs
  * they shortcut: a code point gets its CE when DUCET gives it exactly one,
  * in the starter table when it can begin a contraction. */
+static uint32_t settle_ce(const utf_collator *c, uint32_t ce) {
+    if (0 != ((ce >> DUCET_CE_SECONDARY_SHIFT) & DUCET_CE_SECONDARY_MASK)) {
+        unsigned int p = ce >> 16;
+        for (int r = 0; r < c->n_reorder; r++) {
+            if (p >= c->reorder[r].lo && p <= c->reorder[r].hi) {
+                ce = (ce & 0xFFFFu) | ((uint32_t)(p + c->reorder[r].delta) << 16);
+                break;
+            }
+        }
+    }
+    if (NULL != c->tertiary_map)
+        ce = (ce & ~(uint32_t)DUCET_CE_TERTIARY_MASK) | c->tertiary_map[ce & DUCET_CE_TERTIARY_MASK];
+    return ce;
+}
+
 static void test_collate_latin_tables(void) {
     const char *name = "collate_latin_tables";
-    const utf_collator *root = utf_collator_root();
     int bad = 0;
 
+    for (int k = 0; k < UTF_COLLATOR_COUNT; k++) {
+    const utf_collator *root = &utf_collators[k];
     for (unsigned int cp = 0; cp < DUCET_LATIN_LIMIT; cp++) {
         unsigned char b[4];
         size_t n = cls_enc(cp, b);
@@ -4573,24 +4613,113 @@ static void test_collate_latin_tables(void) {
         uint32_t ce = 0;
         if (0 != idx && 1 == ducet_ce_offset[idx + 1] - ducet_ce_offset[idx])
             ce = ducet_ce_weights[ducet_ce_offset[idx]];
+        if (0 != ce) ce = settle_ce(root, ce);
         int starts = run_collate_dfa(tr_ducet_contract_itt, tr_ducet_contract_sot,
                                      tr_ducet_contract_sbt,
                                      TR_DUCET_CONTRACT_ACCEPTING_STATES_START,
                                      root->contract_start, b, b + n)
                    < TR_DUCET_CONTRACT_ACCEPTING_STATES_START;
-        for (int i = 0; i < root->n_contract3; i++)
-            if (root->contract3[i].cp1 == cp) starts = 1;
+        for (int i = 0; i < root->n_contractions; i++)
+            if (root->contractions[i].cp[0] == cp) starts = 1;
         if (root->latin_ce[cp] != (starts ? 0 : ce)
             || root->latin_starter_ce[cp] != (starts ? ce : 0)) {
-            if (bad++ < 5) test_fail(name, "U+%04X: latin %08X starter %08X, DFA says %08X%s",
-                                     cp, root->latin_ce[cp], root->latin_starter_ce[cp],
+            if (bad++ < 5) test_fail(name, "%s U+%04X: latin %08X starter %08X, DFA says %08X%s",
+                                     root->name, cp, root->latin_ce[cp], root->latin_starter_ce[cp],
                                      ce, starts ? " (starter)" : "");
         }
     }
-    check_size(name, "Latin tables agree with the DFAs", (size_t)bad, 0);
-    check_size(name, "l and L are the starters",
+    }
+    check_size(name, "every collator's Latin tables agree with its DFAs", (size_t)bad, 0);
+
+    /* The slow path applies a collator's settings only when this flag says
+     * it has some. */
+    int flagged = 1;
+    for (int k = 0; k < UTF_COLLATOR_COUNT; k++) {
+        const utf_collator *c = &utf_collators[k];
+        int has = 0 != c->n_reorder || NULL != c->tertiary_map;
+        if (has != (0 != (c->flags & UTF_COLLATOR_HAS_SETTINGS))) flagged = 0;
+    }
+    check_size(name, "UTF_COLLATOR_HAS_SETTINGS matches each collator", (size_t)flagged, 1);
+    const utf_collator *root = utf_collator_root();
+    check_size(name, "l and L are root's starters",
                (size_t)(0 != root->latin_starter_ce['l'] && 0 != root->latin_starter_ce['L']
                         && 0 == root->latin_ce['l'] && 0 == root->latin_ce['L']), 1);
+}
+
+/* Orderings that tell each locale's tailoring and settings apart from
+ * root.  Every expectation is ICU 72's (CLDR 42) for the same locale. */
+static void test_collate_locales(void) {
+    const char *name = "collate_locales";
+    static const struct { const char *loc, *a, *b; int sign; } cases[] = {
+        { "sv", "z", "\xC3\xA5", -1 },  /* z < å */
+        { "sv", "\xC3\xA5", "\xC3\xA4", -1 },  /* å < ä */
+        { "sv", "\xC3\xA4", "\xC3\xB6", -1 },  /* ä < ö */
+        { "sv", "\xC3\xA4b", "ab", 1 },  /* äb > ab */
+        { "root", "\xC3\xA4", "b", -1 },  /* ä < b */
+        { "de", "\xC3\xA4", "b", -1 },  /* ä < b */
+        { "cs", "ch", "h", 1 },  /* ch > h */
+        { "cs", "ch", "i", -1 },  /* ch < i */
+        { "cs", "\xC4\x8D", "cz", 1 },  /* č > cz */
+        { "cs", "\xC4\x8D", "d", -1 },  /* č < d */
+        { "root", "ch", "h", -1 },  /* ch < h */
+        { "es", "\xC3\xB1", "o", -1 },  /* ñ < o */
+        { "es", "\xC3\xB1", "nz", 1 },  /* ñ > nz */
+        { "da", "A", "a", -1 },  /* A < a */
+        { "root", "A", "a", 1 },  /* A > a */
+        { "da", "aa", "z", 1 },  /* aa > z */
+        { "da", "AA", "Aa", -1 },  /* AA < Aa */
+        { "da", "A\xC3\x84", "aa", 1 },  /* AÄ > aa */
+        { "fr_CA", "c\xC3\xB4te", "cot\xC3\xA9", -1 },  /* côte < coté */
+        { "root", "c\xC3\xB4te", "cot\xC3\xA9", 1 },  /* côte > coté */
+        { "fr_CA", "cote", "c\xC3\xB4te", -1 },  /* cote < côte */
+        { "ru", "\xD1\x8F", "a", -1 },  /* я < a */
+        { "root", "\xD1\x8F", "a", 1 },  /* я > a */
+        { "el", "\xCF\x89", "a", -1 },  /* ω < a */
+        { "sr_Latn", "a", "\xD1\x8F", -1 },  /* a < я */
+        { "sr_Latn", "\xD1\x8F", "\xCF\x89", -1 },  /* я < ω */
+        { "hr", "d\xC5\xBE", "dzz", 1 },  /* dž > dzz */
+        { "hr", "\xC4\x91", "d\xC5\xBE", 1 },  /* đ > dž */
+        { "hu", "dzsa", "dzz", 1 },  /* dzsa > dzz */
+        { "hu", "ddzsa", "dzsz", -1 },  /* ddzsa < dzsz */
+        { "hu", "cs", "cz", 1 },  /* cs > cz */
+        { "sr", "\xD0\xB9", "\xD1\x96", -1 },  /* й < і */
+        { "root", "\xD0\xB9", "\xD1\x96", 1 },  /* й > і */
+        { "tr", "\xC4\xB1", "i", -1 },  /* ı < i */
+        { "tr", "\xC4\xB1", "h", 1 },  /* ı > h */
+        { "pl", "\xC5\x82", "m", -1 },  /* ł < m */
+        { "pl", "\xC5\x82", "lz", 1 },  /* ł > lz */
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        const utf_collator *c = utf_collator_find(cases[i].loc);
+        const unsigned char *a = (const unsigned char *)cases[i].a;
+        const unsigned char *b = (const unsigned char *)cases[i].b;
+        size_t na = strlen(cases[i].a), nb = strlen(cases[i].b);
+        unsigned char ka[128], kb[128];
+        size_t la = utf_collate_sortkey_l(a, na, ka, sizeof(ka), c);
+        size_t lb = utf_collate_sortkey_l(b, nb, kb, sizeof(kb), c);
+        int k = memcmp(ka, kb, la < lb ? la : lb);
+        if (0 == k) k = (la > lb) - (la < lb);
+        int cmp = utf_collate_cmp_l(a, na, b, nb, c);
+        cmp = (cmp > 0) - (cmp < 0);
+        k = (k > 0) - (k < 0);
+        if (NULL != c && cmp == cases[i].sign && k == cases[i].sign)
+            test_ok(name, "%s: %s vs %s", cases[i].loc, cases[i].a, cases[i].b);
+        else
+            test_fail(name, "%s: %s vs %s: cmp %d, key %d, want %d", cases[i].loc,
+                      cases[i].a, cases[i].b, cmp, k, cases[i].sign);
+    }
+
+    /* Canonical closure: Czech decomposed c + caron is the letter c-caron. */
+    {
+        const utf_collator *cs = utf_collator_find("cs");
+        const unsigned char dec[] = "c\xCC\x8Cx", pre[] = "\xC4\x8Dx";
+        check_size(name, "cs: c + U+030C ties c-caron",
+                   (size_t)(0 == utf_collate_cmp_l(dec, sizeof(dec) - 1, pre, sizeof(pre) - 1, cs)), 1);
+    }
+
+    /* Locales with no rules of their own share root's machines outright. */
+    check_size(name, "de shares root's tables",
+               (size_t)(utf_collator_find("de")->ducet_start == utf_collator_root()->ducet_start), 1);
 }
 
 static void test_collator_api(void) {
@@ -4615,11 +4744,26 @@ static void test_collator_api(void) {
     }
     check_size(name, "NULL finds root", (size_t)(utf_collator_find(NULL) == root), 1);
 
-    /* No locale is tailored in this build, so anything else finds nothing --
-     * a locale with no ordering here is not silently given root's.  The
-     * POSIX "C" locale orders bytes, not UCA, so it is not root either. */
+    /* Locale spellings resolve to the registry name, falling back a subtag
+     * at a time. */
+    static const char *const spelled[][2] = {
+        { "sv", "sv" }, { "SV-se", "sv" }, { "sv_SE.UTF-8", "sv" }, { "de-AT-1996", "de_AT" },
+        { "de-CH", "de" }, { "nb_NO", "nb" }, { "sr-Latn-RS", "sr_Latn" }, { "sr-RS", "sr" },
+        { "fr-CA", "fr_CA" }, { "fr_BE", "fr" }, { "hu", "hu" },
+    };
+    for (size_t i = 0; i < sizeof(spelled) / sizeof(spelled[0]); i++) {
+        const utf_collator *c = utf_collator_find(spelled[i][0]);
+        if (NULL != c && 0 == strcmp(utf_collator_name(c), spelled[i][1]))
+            test_ok(name, "\"%s\" is %s", spelled[i][0], spelled[i][1]);
+        else
+            test_fail(name, "\"%s\" should find %s", spelled[i][0], spelled[i][1]);
+    }
+
+    /* A locale with no ordering in this build finds nothing rather than
+     * being silently given root's.  The POSIX "C" locale orders bytes, not
+     * UCA, so it is not root either. */
     static const char *const none[] = {
-        "sv", "sv-SE", "de_AT", "C", "POSIX", "x", "rootx", "unde",
+        "ja", "zh-Hant", "C", "POSIX", "x", "rootx", "unde", "svx",
     };
     for (size_t i = 0; i < sizeof(none) / sizeof(none[0]); i++) {
         const utf_collator *c = utf_collator_find(none[i]);
@@ -4712,7 +4856,17 @@ static void test_table_content(void) {
     FP_ARR(h, tr_ducet_itt); FP_ARR(h, tr_ducet_sot); FP_ARR(h, tr_ducet_sbt);
     FP_ARR(h, tr_ducet_contract_itt); FP_ARR(h, tr_ducet_contract_sot);
     FP_ARR(h, tr_ducet_contract_sbt);
-    fp_check(name, "ducet", h, 0x5377CC4C03D5F528ULL);
+    FP_ARR(h, tr_ducet_contract_nfc_compose_result);
+    FP_ARR(h, ducet_ce_offset);
+    h = fp_arr(h, ducet_ce_weights,
+               sizeof(ducet_ce_weights[0]) * ducet_ce_offset[DUCET_CE_SEQUENCES + 1],
+               sizeof(ducet_ce_weights[0]));
+    /* Changed 2026-10-08 from 0x5377CC4C03D5F528 (DFAs only) for the locale
+       collators: tr_ducet and tr_ducet_contract became shared pools holding
+       every collator's machine, the CE tables gained the tailorings' new
+       sequences, and this hash grew to cover the CE offsets, weights and the
+       contraction side table too. */
+    fp_check(name, "ducet", h, 0x8A52CD9E7CB96C2DULL);
 
     h = FP_INIT;
     FP_ARR(h, tr_ascii_itt); FP_ARR(h, tr_ascii_sot); FP_ARR(h, tr_ascii_sbt);
@@ -4782,7 +4936,33 @@ static void test_table_behaviour(void) {
        composition.  Verified confined to the bug -- of all 1,112,064 code
        points, exactly 92 keys changed and all 92 expand under NFC (nfc >
        utf8 length); no non-expanding code point moved. */
-    fp_check(name, "utf_collate_sortkey", hSort, 0x8033CCFCDB328359ULL);
+    /* Changed 2026-10-08 from 0x8033CCFCDB328359 for the locale collators.
+       Root key bytes moved two ways: weights were respaced to leave
+       tailorings room (19,476 primaries, 262 secondaries and 27 tertiaries
+       shifted up, order kept), and the CE lost its unused variable flag so
+       primaries have 16 bits.  The second fixes a bug: masked to 15 bits,
+       the implicit trail weight 0x8000 of U+8000, U+18000, U+20000, U+28000
+       and U+30000 became 0, an ignorable, and those ideographs compared
+       against whatever followed them.  Verified against 4da4cc6 on 2,000,000
+       random string pairs: comparison and key order changed only for
+       strings containing such an ideograph (10,371 pairs), where ICU 72
+       agreed with the new order on 300 of 300 sampled. */
+    fp_check(name, "utf_collate_sortkey", hSort, 0x3C330FE94DCAB22AULL);
+
+    /* Every collator over U+0000..U+24FF -- the scripts the locales tailor,
+     * reorder or case-map -- so drift in any locale's tables, or in the
+     * code reading them, shows here and not only for root. */
+    uint64_t hLoc = FP_INIT;
+    for (int k = 0; k < UTF_COLLATOR_COUNT; k++) {
+        hLoc = fp_u16(hLoc, (unsigned int)k);
+        for (unsigned int cp = 0; cp < 0x2500; cp++) {
+            size_t n = cls_enc(cp, b);
+            size_t nKey = utf_collate_sortkey_l(b, n, key, sizeof(key), &utf_collators[k]);
+            hLoc = fp_u16(hLoc, (unsigned int)nKey);
+            for (size_t i = 0; i < nKey; i++) hLoc = fp_byte(hLoc, key[i]);
+        }
+    }
+    fp_check(name, "utf_collate_sortkey_l, every collator", hLoc, 0x3225E1E02229ABE9ULL);
 }
 
 /* ================================================================
@@ -4854,6 +5034,7 @@ static const test_suite_t suites[] = {
     { "collate_contractions", test_collate_contractions },
     { "collate_latin_tables", test_collate_latin_tables },
     { "collator_api",     test_collator_api },
+    { "collate_locales",  test_collate_locales },
     { "classify_word",    test_classify_word },
     { "classify_connector", test_classify_connector },
     { "classify_census",  test_classify_census },

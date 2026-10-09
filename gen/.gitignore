@@ -12,3 +12,4 @@ autom4te.cache/
 # Default outputs of the C++ builders when run without -o / -i.
 utf8tables.cpp.txt
 utf8tables.h.txt
+__pycache__/

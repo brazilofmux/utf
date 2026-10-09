@@ -32,6 +32,7 @@ LIB_SRCS = src/color_ops.c \
            tables/xterm_palette.c
 
 LIB_OBJS = $(LIB_SRCS:.c=.o)
+HEADERS  = $(wildcard include/utf/*.h)
 
 # Test sources
 TEST_SRCS = tests/test_color_ops.c
@@ -45,6 +46,11 @@ $(LIB): $(LIB_OBJS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+# Every object depends on the headers.  gen/gen_ducet.py rewrites the table
+# dimensions in utf_tables.h, and an object compiled against the old ones
+# reads the new tables at the wrong offsets -- silently, not as an error.
+$(LIB_OBJS) $(TEST_OBJS): $(HEADERS)
 
 src/color_ops.o: src/color_ops.c
 	$(CC) $(RAGEL_CFLAGS) $(INCLUDES) -c $< -o $@

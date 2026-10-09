@@ -215,6 +215,42 @@ static void test_ci_bytes(const char *label,
     }
 }
 
+/* A locale's collator against ICU's for the same locale: comparison and
+ * sort key, at tertiary strength. */
+static void test_locale(const char *loc, const char *a, const char *b)
+{
+    const utf_collator *lc = utf_collator_find(loc);
+    UErrorCode err = U_ZERO_ERROR;
+    UCollator *coll = ucol_open(loc, &err);
+    if (NULL == lc || U_FAILURE(err)) {
+        printf("  FAIL %s: no collator (libutf %p, ICU %s)\n", loc, (const void *)lc,
+               u_errorName(err));
+        g_fail++;
+        return;
+    }
+    UChar ua[512], ub[512];
+    int32_t ual, ubl;
+    u_strFromUTF8(ua, 512, &ual, a, (int32_t)strlen(a), &err);
+    u_strFromUTF8(ub, 512, &ubl, b, (int32_t)strlen(b), &err);
+    UCollationResult ir = ucol_strcoll(coll, ua, ual, ub, ubl);
+    int is = (ir == UCOL_LESS) ? -1 : (ir == UCOL_GREATER) ? 1 : 0;
+    int ls = sign(utf_collate_cmp_l((const unsigned char *)a, strlen(a),
+                                    (const unsigned char *)b, strlen(b), lc));
+    unsigned char ka[1024], kb[1024];
+    size_t na = utf_collate_sortkey_l((const unsigned char *)a, strlen(a), ka, sizeof(ka), lc);
+    size_t nb = utf_collate_sortkey_l((const unsigned char *)b, strlen(b), kb, sizeof(kb), lc);
+    int kc = memcmp(ka, kb, (na < nb) ? na : nb);
+    int ks = sign(kc ? kc : (int)(na > nb) - (int)(na < nb));
+    if (ls != is || ks != is) {
+        printf("  FAIL %s: \"%s\" vs \"%s\": libutf=%d key=%d ICU=%d\n",
+               loc, a, b, ls, ks, is);
+        g_fail++;
+    } else {
+        g_pass++;
+    }
+    ucol_close(coll);
+}
+
 int main(void)
 {
     UErrorCode err = U_ZERO_ERROR;
@@ -302,6 +338,34 @@ int main(void)
     test_sortkey_order("l_middle_dot_key", "L\xc2\xb7", "L!", coll);
     test_sortkey_order("tibetan_vocalic_rr_key",
              "a\xe0\xbe\xb2\xe0\xbd\xb1\xe0\xbe\x80", "a\xe0\xbe\xb3", coll);
+
+    /* An implicit weight's trail of 0x8000 (U+8000, U+20000, ...) once lost
+     * its top bit to a 15-bit mask and became ignorable. */
+    test_cmp("implicit_trail_8000", "\xe8\x80\x80" "b", "\xe8\x80\x81" "a", coll);
+    test_cmp("implicit_trail_20000", "\xf0\xa0\x80\x80" "z", "\xf0\xa0\x80\x81" "a", coll);
+
+    printf("\n[locale collators vs ICU]\n");
+
+    /* Tailorings: letters after z, contractions, letters inside the alphabet. */
+    test_locale("sv", "z", "\xc3\xa5");                 /* z < a-ring */
+    test_locale("sv", "\xc3\xa4" "b", "ab");               /* a-umlaut after z */
+    test_locale("de", "\xc3\xa4", "b");                 /* German: plain root */
+    test_locale("cs", "ch", "h");                       /* ch after h */
+    test_locale("cs", "c\xcc\x8c", "\xc4\x8d");          /* decomposed c-caron */
+    test_locale("es", "\xc3\xb1", "nz");                /* n-tilde after n */
+    test_locale("pl", "\xc5\x82", "lz");                /* l-stroke after l */
+    test_locale("tr", "\xc4\xb1", "i");                 /* dotless i before i */
+    test_locale("hu", "dzsa", "dzz");                   /* three-letter dzs */
+    test_locale("hu", "ddzsa", "dzsz");                 /* four-letter ddzs */
+    /* Settings: case first, backward accents, script order, suppression. */
+    test_locale("da", "A", "a");                        /* caseFirst upper */
+    test_locale("da", "AA", "Aa");
+    test_locale("da", "A\xc3\x84", "aa");              /* closure through AA */
+    test_locale("fr_CA", "c\xc3\xb4te", "cot\xc3\xa9");  /* backwards 2 */
+    test_locale("ru", "\xd1\x8f", "a");                 /* reorder Cyrl */
+    test_locale("el", "\xcf\x89", "a");                 /* reorder Grek */
+    test_locale("sr_Latn", "\xd1\x8f", "\xcf\x89");      /* reorder Latn Cyrl */
+    test_locale("sr", "\xd0\xb9", "\xd1\x96");           /* suppressContractions */
 
     printf("\n[collate_cmp_ci]\n");
 

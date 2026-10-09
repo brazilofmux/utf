@@ -51,7 +51,7 @@ All tools share `smutil.cpp/h` (state machine compression library) and
 |--------|-------|--------|
 | gen_ccc.pl | UnicodeData.txt | data/tr_ccc.txt |
 | gen_compose.pl | UnicodeData.txt, CompositionExclusions.txt | data/tr_compose.txt |
-| gen_ducet.py | allkeys.txt | data/tr_ducet.txt, data/tr_ducet_contract.txt, ../tables/ducet_cetable.c |
+| gen_ducet.py | allkeys.txt, UnicodeData.txt, Scripts.txt, cldr/collation/*.xml | ../tables/ducet_dfa_tables.c, ../tables/ducet_cetable.c, the DUCET section of ../include/utf/utf_tables.h; data/tr_ducet*.txt (root only, for the C++ builders) |
 | gen_extpict.pl | emoji-data.txt | data/cl_ExtPict.txt |
 | gen_gcb.pl | GraphemeBreakProperty.txt | data/tr_gcb.txt |
 | gen_word.pl | DerivedCoreProperties.txt, UnicodeData.txt | data/cl_Word.txt |
@@ -80,3 +80,18 @@ Downloaded from https://www.unicode.org/Public/16.0.0/ucd/:
 3. Build the C++ tools and run them to regenerate C tables.
 4. Copy the output to `../tables/`.
 5. Rebuild the library: `cd .. && make clean && make && make test`.
+
+## Collation and locales
+
+`gen_ducet.py` builds every collator from DUCET and the CLDR 46 rules in
+`data/cldr/collation/` (Unicode license in `data/cldr/LICENSE`), using
+`cldr_tailor.py` to apply the rules and `dfa_pool.py` to build the DFAs.
+All collators share one pool of DFA states, so a locale costs only the
+rows its tailoring changes.  The locales are listed in `LOCALES` at the
+top of `gen_ducet.py`; adding one means copying its XML file here.
+
+The generator checks its own output (every root entry and every entry a
+locale changed is read back through the emitted DFAs) and is
+deterministic.  Regenerating changes the table fingerprints in
+`tests/test_color_ops.c` -- see `CLAUDE.md` before updating them.
+

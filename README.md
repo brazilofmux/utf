@@ -20,7 +20,7 @@ cd utf && make && make test
 | Grapheme | `grapheme.h` | Extended Grapheme Cluster segmentation (UAX #29) — emoji ZWJ, regional indicators, Hangul |
 | NFC | `nfc.h` | Canonical normalization (UAX #15) with Hangul algorithmic composition |
 | Classify | `classify.h` | Word-character membership (Alphabetic + Nd + Mn + Mc), connector punctuation |
-| Collation | `collate.h` | DUCET sort (UTS #10) — multi-level comparison, case-insensitive comparison, and binary sort keys; each also takes a collator (`_l` forms, root today) |
+| Collation | `collate.h` | DUCET sort (UTS #10) — multi-level comparison, case-insensitive comparison, and binary sort keys; the `_l` forms take a collator for one of 53 European locales (CLDR 46 tailorings: contractions, reordered scripts, upper-case-first, French accents) |
 | Tables | `utf_tables.h` | Compressed DFA tables for case mapping, character width, GCB, charset approximation |
 
 ## Performance vs ICU 78.3
@@ -83,11 +83,15 @@ as a reference implementation:
   — plus a 100,000-input randomized differential fuzz and 2,000
   long-repeated-run comparisons.  All match ICU byte-for-byte.
 
-- **Collation**: 61 test cases.  39 compare directly against ICU
+- **Collation**: 81 test cases.  59 compare directly against ICU
   across primary (base character), secondary (accent), and tertiary
-  (case) weight levels, and through contractions — all match ICU.  22
-  additional cases verify sort key consistency, case-insensitive
-  comparison, long-string overflow, and malformed UTF-8 resilience.
+  (case) weight levels, through contractions, and for 18 locale
+  orderings — all match ICU.  22 additional cases verify sort key
+  consistency, case-insensitive comparison, long-string overflow, and
+  malformed UTF-8 resilience.  Every locale collator was also checked
+  against ICU 72 on 11k–980k string pairs each; 51 of 53 match on every
+  pair, and the two that differ (br, lv) follow Unicode 16 / CLDR 46
+  changes newer than ICU 72.
 
 Tests are in `tests/test_nfc_icu.c` and `tests/test_collate_icu.c`.
 Build with ICU development headers to run them.

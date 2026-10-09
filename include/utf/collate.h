@@ -9,6 +9,12 @@
  * the last argument, where NULL also means root.  Collators are constant
  * tables built into the library -- utf_collator_find never allocates, and
  * the result needs no freeing and is safe to share between threads.
+ *
+ * Built in: root plus 53 European locales from CLDR 46 -- az be bg br bs
+ * ca cs cy da de de_AT dsb el en eo es et fi fo fr fr_CA fy ga gl hr hsb
+ * hu is it kl lb lt lv mk mt nb nl nn no pl pt ro ru se sk sl smn sq sr
+ * sr_Latn sv tr uk.  Some (de, en, fr, ...) have no rules of their own and
+ * order exactly as root.
  */
 
 #ifndef UTF_COLLATE_H
