@@ -90,6 +90,17 @@ All collators share one pool of DFA states, so a locale costs only the
 rows its tailoring changes.  The locales are listed in `LOCALES` at the
 top of `gen_ducet.py`; adding one means copying its XML file here.
 
+Consumers of the collators that also need CLDR 46's locale data for the
+same 53 locales (dates, numbers, currencies) get it from
+`data/cldr/main/` and `data/cldr/supplemental/`.  Nothing in libutf
+reads those files and they are about 28 MB, so they are not committed:
+`fetch_cldr.py` downloads them from the `release-46` tag of
+unicode-org/cldr (or symlinks them from a local checkout given by
+`--mirror DIR` or `$CLDR_MIRROR`) and checks every file against the
+committed `data/cldr/SHA256SUMS`.  Re-running it is a no-op once the
+cache is complete; `--verify` only checks.  Rewrite the manifest with
+`--update-manifest` when moving to a new CLDR release.
+
 The generator checks its own output (every root entry and every entry a
 locale changed is read back through the emitted DFAs) and is
 deterministic.  Regenerating changes the table fingerprints in
