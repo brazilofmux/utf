@@ -3193,6 +3193,96 @@ static void test_collate_nfc_tiebreak(void) {
     check_size(name, "sortkey carries full NFC tiebreak", (size_t)found, 1);
 }
 
+/* Regression: contractions were skipped in two ways.  ExtractCEs and the
+ * Latin cache assumed ASCII starts no contraction, but DUCET contracts l and
+ * L with a middle dot (Catalan ela geminada), so the dot weighed in as a
+ * punctuation primary.  And the three-code-point contractions were
+ * generated into ducet_contract3 but never looked up.  Every expectation
+ * below was checked against ICU 72 root, except Gurung Khema and Kirat Rai
+ * (Unicode 16, newer than ICU 72), which follow allkeys.txt. */
+static int collate_sign(const char *a, const char *b) {
+    int c = utf_collate_cmp((const unsigned char *)a, strlen(a),
+                            (const unsigned char *)b, strlen(b));
+    return (c > 0) - (c < 0);
+}
+
+static int sortkey_sign(const char *a, const char *b) {
+    unsigned char ka[256], kb[256];
+    size_t na = utf_collate_sortkey((const unsigned char *)a, strlen(a), ka, sizeof(ka));
+    size_t nb = utf_collate_sortkey((const unsigned char *)b, strlen(b), kb, sizeof(kb));
+    int c = memcmp(ka, kb, na < nb ? na : nb);
+    if (0 == c) c = (na > nb) - (na < nb);
+    return (c > 0) - (c < 0);
+}
+
+static void check_order(const char *name, const char *label,
+                        const char *a, const char *b, int expect) {
+    if (collate_sign(a, b) == expect && sortkey_sign(a, b) == expect) {
+        test_ok(name, "%s", label);
+    } else {
+        test_fail(name, "%s: cmp %d, sortkey %d, want %d", label,
+                  collate_sign(a, b), sortkey_sign(a, b), expect);
+    }
+}
+
+static void test_collate_contractions(void) {
+    const char *name = "collate_contractions";
+    unsigned char key[64], keyL[64];
+    size_t n, nL;
+
+    /* l + U+00B7 is one element: l's primary, the dot a secondary. */
+    n  = utf_collate_sortkey((const unsigned char *)"l\xC2\xB7", 3, key, sizeof(key));
+    nL = utf_collate_sortkey((const unsigned char *)"l", 1, keyL, sizeof(keyL));
+    check_size(name, "l\xC2\xB7 has one primary", (size_t)(n >= 4 && nL >= 2
+               && 0 == memcmp(key, keyL, 2) && 0 == key[2] && 0 == key[3]), 1);
+
+    /* So "L!" sorts after "L·" (the dot no longer a primary below '!'),
+     * on the Latin fast path and -- behind a Tibetan letter, which no
+     * Latin path takes -- on the full path. */
+    check_order(name, "L\xC2\xB7 < L! (fast path)", "L\xC2\xB7", "L!", -1);
+    check_order(name, "L\xC2\xB7 < L! (full path)",
+                "\xE0\xBD\x80L\xC2\xB7", "\xE0\xBD\x80L!", -1);
+    check_order(name, "l + U+0387 contracts too", "l\xCE\x87", "l!", -1);
+    check_order(name, "col\xC2\xB7lecci\xC3\xB3 < colm",
+                "col\xC2\xB7lecci\xC3\xB3", "colm", -1);
+
+    /* Three code points: TIBETAN VOWEL SIGN VOCALIC RR (0FB2 0F71 0F80)
+     * sorts after 0FB3. */
+    check_order(name, "a + U+0FB2 U+0F71 U+0F80 > a + U+0FB3",
+                "a\xE0\xBE\xB2\xE0\xBD\xB1\xE0\xBE\x80", "a\xE0\xBE\xB3", 1);
+    /* GURUNG KHEMA VOWEL SIGN O (1611E 1611E 1611F, 5330) after AI
+     * (1611E 16120, 532F); split, it was U (532B) then I. */
+    check_order(name, "Gurung Khema O > AI",
+                "\xF0\x96\x84\x9E\xF0\x96\x84\x9E\xF0\x96\x84\x9F",
+                "\xF0\x96\x84\x9E\xF0\x96\x84\xA0", 1);
+    /* KIRAT RAI VOWEL SIGN AU two ways: 16D63 16D67 16D67 and its
+     * canonical equivalent 16D63 16D68 share one CE (5363). */
+    {
+        const char *au3 = "\xF0\x96\xB5\xA3\xF0\x96\xB5\xA7\xF0\x96\xB5\xA7";
+        const char *au2 = "\xF0\x96\xB5\xA3\xF0\x96\xB5\xA8";
+        check_size(name, "Kirat Rai AU spellings tie (ci)",
+                   (size_t)(0 == utf_collate_cmp_ci((const unsigned char *)au3, strlen(au3),
+                                                    (const unsigned char *)au2, strlen(au2))), 1);
+    }
+
+    /* ExtractCEs tries the three-code-point table only behind the
+     * contraction DFA's lead-byte gate, so every three-code-point
+     * contraction must also start a two-code-point one. */
+    {
+        int gated = 1;
+        for (int i = 0; i < DUCET_CONTRACT3_COUNT; i++) {
+            unsigned char b[4];
+            uint32_t cp = ducet_contract3[i].cp1;
+            b[0] = (cp < 0x80) ? (unsigned char)cp
+                 : (cp < 0x800) ? (unsigned char)(0xC0 | (cp >> 6))
+                 : (cp < 0x10000) ? (unsigned char)(0xE0 | (cp >> 12))
+                 : (unsigned char)(0xF0 | (cp >> 18));
+            if (0 == tr_ducet_contract_itt[b[0]]) gated = 0;
+        }
+        check_size(name, "contract3 starters pass the lead-byte gate", (size_t)gated, 1);
+    }
+}
+
 static void test_console_width(void) {
     const char *name = "console_width";
 
@@ -4622,6 +4712,7 @@ static const test_suite_t suites[] = {
     { "cluster_advance",  test_cluster_advance },
     { "console_width",    test_console_width },
     { "collate_nfc_tiebreak", test_collate_nfc_tiebreak },
+    { "collate_contractions", test_collate_contractions },
     { "classify_word",    test_classify_word },
     { "classify_connector", test_classify_connector },
     { "classify_census",  test_classify_census },

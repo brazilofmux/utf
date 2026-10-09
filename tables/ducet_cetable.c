@@ -7440,10 +7440,7 @@ const uint32_t ducet_ce_weights[41418] =
 //
 #define DUCET_CONTRACT3_COUNT 8
 
-const struct {
-    uint32_t cp1, cp2, cp3;
-    unsigned short ce_index;
-} ducet_contract3[8] =
+const utf_ducet_contract3 ducet_contract3[8] =
 {
     { 0x0CC6, 0x0CC2, 0x0CD5, 14993 },
     { 0x0DD9, 0x0DCF, 0x0DCA, 15156 },

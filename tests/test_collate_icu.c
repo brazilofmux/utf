@@ -287,6 +287,22 @@ int main(void)
     test_cmp("num_1_2", "1", "2", coll);
     test_cmp("num_9_10", "9", "10", coll);
 
+    /* --- Contractions --- */
+    /* DUCET contracts l/L with a middle dot (U+00B7, or its canonical
+     * equivalent U+0387); the ASCII and Latin fast paths used to skip
+     * them.  Three-code-point contractions used to be skipped entirely. */
+    test_cmp("l_middle_dot_fast", "L\xc2\xb7", "L!", coll);
+    test_cmp("l_middle_dot_full", "\xe0\xbd\x80L\xc2\xb7", "\xe0\xbd\x80L!", coll);
+    test_cmp("l_ano_teleia", "l\xce\x87", "l!", coll);
+    test_cmp("catalan_ela_geminada", "col\xc2\xb7lecci\xc3\xb3", "colm", coll);
+    test_cmp("tibetan_vocalic_rr",
+             "a\xe0\xbe\xb2\xe0\xbd\xb1\xe0\xbe\x80", "a\xe0\xbe\xb3", coll);
+    test_cmp("kannada_oo_split",
+             "\xe0\xb3\x86\xe0\xb3\x82\xe0\xb3\x95", "\xe0\xb3\x8b", coll);
+    test_sortkey_order("l_middle_dot_key", "L\xc2\xb7", "L!", coll);
+    test_sortkey_order("tibetan_vocalic_rr_key",
+             "a\xe0\xbe\xb2\xe0\xbd\xb1\xe0\xbe\x80", "a\xe0\xbe\xb3", coll);
+
     printf("\n[collate_cmp_ci]\n");
 
     test_ci("ci_same_case", "hello", "hello", 0);

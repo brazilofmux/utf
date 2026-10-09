@@ -165,6 +165,18 @@ extern UTF_API const uint32_t tr_ducet_contract_nfc_compose_result[954];
 extern const unsigned short ducet_ce_offset[35507];
 extern const uint32_t ducet_ce_weights[];
 
+/* DUCET three-code-point contractions (from ducet_cetable).  Matched before
+ * the two-code-point DFA, so the longer contraction wins.  Each cp1 also
+ * starts a two-code-point contraction, which is what lets the contraction
+ * DFA's lead-byte column gate both lookups; test collate_contractions pins
+ * that. */
+typedef struct {
+    uint32_t cp1, cp2, cp3;
+    unsigned short ce_index;
+} utf_ducet_contract3;
+#define DUCET_CONTRACT3_COUNT 8
+extern const utf_ducet_contract3 ducet_contract3[DUCET_CONTRACT3_COUNT];
+
 /* ---- Charset approximation DFAs ---- */
 
 /* tr_ascii: UTF-8 to ASCII approximation */

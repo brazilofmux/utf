@@ -168,6 +168,54 @@ static int GetContraction(const unsigned char *p1, const unsigned char *p1End,
     return 0;
 }
 
+/* Three-code-point contractions are few (DUCET has 8), so a scan beats a
+ * DFA.  p1 is the first code point's bytes, already known to start a
+ * contraction; on a match *ppEnd moves past the third code point.
+ */
+static int GetContraction3(const unsigned char *p1, const unsigned char *p2,
+                           const unsigned char *pEnd,
+                           const unsigned char **ppEnd)
+{
+    uint32_t cp1 = utf8_decode_c(p1, p2);
+    for (int i = 0; i < DUCET_CONTRACT3_COUNT; i++) {
+        if (ducet_contract3[i].cp1 != cp1) continue;
+        const unsigned char *p3 = utf8_advance_c(p2, pEnd);
+        if (p3 >= pEnd || ducet_contract3[i].cp2 != utf8_decode_c(p2, p3))
+            continue;
+        const unsigned char *p4 = utf8_advance_c(p3, pEnd);
+        if (ducet_contract3[i].cp3 != utf8_decode_c(p3, p4)) continue;
+        *ppEnd = p4;
+        return ducet_contract3[i].ce_index;
+    }
+    return 0;
+}
+
+/* Could a contraction begin with this code point?  Only the Latin cache
+ * asks, once per code point, so it runs the DFA rather than keeping a
+ * second table: a code point that starts no contraction drives the DFA
+ * into an accepting state (no match) before its bytes run out.
+ */
+static int StartsContraction(const unsigned char *p, const unsigned char *pEnd)
+{
+    int iState = TR_DUCET_CONTRACT_START_STATE;
+    while (p < pEnd && iState < TR_DUCET_CONTRACT_ACCEPTING_STATES_START) {
+        int iColumn = tr_ducet_contract_itt[*p++];
+        int iOffset = tr_ducet_contract_sot[iState];
+        for (;;) {
+            int y = tr_ducet_contract_sbt[iOffset];
+            if (y < 128) {
+                if (iColumn < y) { iState = tr_ducet_contract_sbt[iOffset + 1]; break; }
+                iColumn -= y; iOffset += 2;
+            } else {
+                y = 256 - y;
+                if (iColumn < y) { iState = tr_ducet_contract_sbt[iOffset + iColumn + 1]; break; }
+                iColumn -= y; iOffset += y + 1;
+            }
+        }
+    }
+    return iState < TR_DUCET_CONTRACT_ACCEPTING_STATES_START;
+}
+
 /* --- Implicit weights (UCA Section 10.1) --- */
 
 typedef struct { uint32_t start; uint32_t end; unsigned short base; } ImplicitRange;
@@ -216,8 +264,11 @@ static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
     const unsigned char *p = *pp;
     int nCEs = 0;
 
-    /* ASCII fast path: no contractions, single-byte DUCET lookup. */
-    if (*p < 0x80) {
+    /* ASCII fast path: single-byte DUCET lookup -- unless the byte can
+     * start a contraction, as l and L do (DUCET contracts each with a
+     * middle dot).  Column 0 of the contraction DFA starts none.
+     */
+    if (*p < 0x80 && 0 == tr_ducet_contract_itt[*p]) {
         int ceIndex = GetDUCET(p, p + 1);
         if (0 != ceIndex) {
             int start = ducet_ce_offset[ceIndex];
@@ -236,19 +287,23 @@ static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
         return nCEs;
     }
 
-    /* Non-ASCII: advance, try contraction, then single-cp DUCET. */
-    const unsigned char *pNext = utf8_advance_c(p, pEnd);
+    /* Otherwise advance, try contraction, then single-cp DUCET. */
+    const unsigned char *pNext = (*p < 0x80) ? p + 1 : utf8_advance_c(p, pEnd);
     int ceIndex = 0;
     const unsigned char *pConsumed = pNext;
 
     /* Contraction check: only if the lead byte maps to a non-default
      * column in the contraction DFA.  Column 0 is the default and can
-     * never reach an accepting state, so skip the DFA entirely.
+     * never reach an accepting state, so skip the DFA entirely.  The
+     * longest contraction wins, so three code points are tried first.
      */
     if (tr_ducet_contract_itt[*p] != 0 && pNext < pEnd) {
-        const unsigned char *pNext2 = utf8_advance_c(pNext, pEnd);
-        ceIndex = GetContraction(p, pNext, pNext, pNext2);
-        if (0 != ceIndex) pConsumed = pNext2;
+        ceIndex = GetContraction3(p, pNext, pEnd, &pConsumed);
+        if (0 == ceIndex) {
+            const unsigned char *pNext2 = utf8_advance_c(pNext, pEnd);
+            ceIndex = GetContraction(p, pNext, pNext, pNext2);
+            if (0 != ceIndex) pConsumed = pNext2;
+        }
     }
 
     if (0 == ceIndex) ceIndex = GetDUCET(p, pNext);
@@ -281,9 +336,14 @@ static int ExtractCEs(const unsigned char **pp, const unsigned char *pEnd,
  *
  * This is the key fast path: Latin text skips DFA traversal, contraction
  * checks, and UTF-8 validation entirely — one table lookup per character.
+ * A character that can start a contraction (l and L, for l·) is 0 there,
+ * keeping the common case one load and one branch; its CE is in
+ * s_latin_starter_ce instead, good only when the next character does not
+ * complete a contraction (LatinStarterCE checks).
  */
 #define LATIN_CE_LIMIT 0x180
 static uint32_t s_latin_ce[LATIN_CE_LIMIT];
+static uint32_t s_latin_starter_ce[LATIN_CE_LIMIT];
 #if defined(UTF_USE_ATOMICS)
 static atomic_int s_latin_ce_state;
 #else
@@ -303,16 +363,18 @@ static void InitLatinCache(void)
             buf[1] = (unsigned char)(0x80 | (cp & 0x3F));
             n = 2;
         }
+        int starts = StartsContraction(buf, buf + n);
         int idx = GetDUCET(buf, buf + n);
+        s_latin_ce[cp] = 0;
+        s_latin_starter_ce[cp] = 0;
         if (0 != idx) {
             int start = ducet_ce_offset[idx];
             int end   = ducet_ce_offset[idx + 1];
             if (end - start == 1) {
-                s_latin_ce[cp] = ducet_ce_weights[start];
-                continue;
+                if (starts) s_latin_starter_ce[cp] = ducet_ce_weights[start];
+                else        s_latin_ce[cp] = ducet_ce_weights[start];
             }
         }
-        s_latin_ce[cp] = 0;
     }
 }
 
@@ -348,6 +410,22 @@ static void EnsureLatinCache(void)
     }
 }
 #endif
+
+/* The cached CE for Latin code point cp at p (ending at pNext) when cp
+ * can start a contraction but none begins here; otherwise 0, sending the
+ * caller to the full path.  Reached only on a 0 in s_latin_ce.
+ */
+static uint32_t LatinStarterCE(uint32_t cp, const unsigned char *p,
+                               const unsigned char *pNext,
+                               const unsigned char *pEnd)
+{
+    const unsigned char *pMatchEnd;
+    uint32_t ce = s_latin_starter_ce[cp];
+    if (0 == ce || pNext >= pEnd) return ce;
+    if (0 != GetContraction3(p, pNext, pEnd, &pMatchEnd)) return 0;
+    if (0 != GetContraction(p, pNext, pNext, utf8_advance_c(pNext, pEnd))) return 0;
+    return ce;
+}
 
 /* --- CE collection (bounded fast path) --- */
 
@@ -684,13 +762,15 @@ static inline uint32_t NextLatinCE(const unsigned char **pp,
     const unsigned char *p = *pp;
     if (*p < 0x80) {
         uint32_t ce = s_latin_ce[*p];
-        if (0 != ce) { *pp = p + 1; return ce; }
-        return 0;
+        if (0 == ce) ce = LatinStarterCE(*p, p, p + 1, pEnd);
+        if (0 != ce) *pp = p + 1;
+        return ce;
     }
     if ((unsigned)(*p - 0xC2) <= (0xC5 - 0xC2)
         && p + 1 < pEnd && (p[1] & 0xC0) == 0x80) {
         uint32_t cp = (uint32_t)((*p & 0x1F) << 6) | (p[1] & 0x3F);
         uint32_t ce = s_latin_ce[cp];
+        if (0 == ce) ce = LatinStarterCE(cp, p, p + 2, pEnd);
         if (0 != ce) { *pp = p + 2; return ce; }
     }
     return 0;
@@ -716,7 +796,10 @@ static int FastLatinCmp(const unsigned char *a, size_t nA,
     int secDiff = 0, tertDiff = 0;
 
     while (pa < paEnd && pb < pbEnd) {
-        while (pa < paEnd && pb < pbEnd && *pa < 0x80 && *pa == *pb) {
+        /* Skip a common ASCII prefix -- but not past a character that may
+         * start a contraction, whose CEs depend on what follows it. */
+        while (pa < paEnd && pb < pbEnd && *pa < 0x80 && *pa == *pb
+               && 0 != s_latin_ce[*pa]) {
             pa++;
             pb++;
         }
@@ -769,7 +852,10 @@ static int FastLatinCmpCI(const unsigned char *a, size_t nA,
     const unsigned char *pb = b, *pbEnd = b + nB;
 
     while (pa < paEnd && pb < pbEnd) {
-        while (pa < paEnd && pb < pbEnd && *pa < 0x80 && *pa == *pb) {
+        /* Skip a common ASCII prefix -- but not past a character that may
+         * start a contraction, whose CEs depend on what follows it. */
+        while (pa < paEnd && pb < pbEnd && *pa < 0x80 && *pa == *pb
+               && 0 != s_latin_ce[*pa]) {
             pa++;
             pb++;
         }
@@ -802,10 +888,14 @@ static int FastLatinCmpCI(const unsigned char *a, size_t nA,
 
 static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
                             unsigned char *key, size_t nKeyMax,
-                            size_t *pPos, int bCaseSensitive)
+                            size_t *pPosOut, int bCaseSensitive)
 {
     EnsureLatinCache();
-    size_t startPos = *pPos;
+    /* A local cursor, written back on success.  The caller's position has
+       its address passed to out-of-line helpers on the full path, which
+       would otherwise pin every append in these loops to memory. */
+    size_t pos = *pPosOut;
+    size_t *pPos = &pos;
 
     const unsigned char *p = src;
     const unsigned char *pEnd = src + nSrc;
@@ -813,7 +903,6 @@ static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
     while (p < pEnd) {
         uint32_t ce = NextLatinCE(&p, pEnd);
         if (0 == ce) {
-            *pPos = startPos;
             return 0;
         }
         AppendBE16(key, nKeyMax, pPos, CE_PRIMARY(ce));
@@ -832,7 +921,6 @@ static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
         while (p < pEnd) {
             uint32_t ce = NextLatinCE(&p, pEnd);
             if (0 == ce) {
-                *pPos = startPos;
                 return 0;
             }
             AppendByte(key, nKeyMax, pPos, (unsigned char)CE_TERTIARY(ce));
@@ -842,25 +930,46 @@ static int FastLatinSortKey(const unsigned char *src, size_t nSrc,
             AppendByte(key, nKeyMax, pPos, src[i]);
     }
 
+    *pPosOut = pos;
     return 1;
 }
 
 static int FastASCIISortKeyCI(const unsigned char *src, size_t nSrc,
                               unsigned char *key, size_t nKeyMax,
-                              size_t *pPos)
+                              size_t *pPosOut)
 {
     EnsureLatinCache();
+    size_t pos = *pPosOut;          /* local cursor, as in FastLatinSortKey */
+    size_t *pPos = &pos;
 
+    int nStarters = 0;
     for (size_t i = 0; i < nSrc; i++) {
-        if (src[i] >= 0x80 || 0 == s_latin_ce[src[i]])
-            return 0;
+        if (src[i] >= 0x80) return 0;
+        if (0 == s_latin_ce[src[i]]) {
+            if (0 == LatinStarterCE(src[i], src + i, src + i + 1, src + nSrc))
+                return 0;
+            nStarters++;
+        }
     }
 
-    for (size_t i = 0; i < nSrc; i++)
-        AppendBE16(key, nKeyMax, pPos, CE_PRIMARY(s_latin_ce[src[i]]));
-    AppendBE16(key, nKeyMax, pPos, 0);
-    for (size_t i = 0; i < nSrc; i++)
-        AppendBE16(key, nKeyMax, pPos, CE_SECONDARY(s_latin_ce[src[i]]));
+    if (0 == nStarters) {
+        for (size_t i = 0; i < nSrc; i++)
+            AppendBE16(key, nKeyMax, pPos, CE_PRIMARY(s_latin_ce[src[i]]));
+        AppendBE16(key, nKeyMax, pPos, 0);
+        for (size_t i = 0; i < nSrc; i++)
+            AppendBE16(key, nKeyMax, pPos, CE_SECONDARY(s_latin_ce[src[i]]));
+    } else {
+        /* Every character checked out above: a 0 in s_latin_ce is a
+         * starter that does not contract here. */
+#define ASCII_CE(c) (s_latin_ce[c] ? s_latin_ce[c] : s_latin_starter_ce[c])
+        for (size_t i = 0; i < nSrc; i++)
+            AppendBE16(key, nKeyMax, pPos, CE_PRIMARY(ASCII_CE(src[i])));
+        AppendBE16(key, nKeyMax, pPos, 0);
+        for (size_t i = 0; i < nSrc; i++)
+            AppendBE16(key, nKeyMax, pPos, CE_SECONDARY(ASCII_CE(src[i])));
+#undef ASCII_CE
+    }
+    *pPosOut = pos;
     return 1;
 }
 

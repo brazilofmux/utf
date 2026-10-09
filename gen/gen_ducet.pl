@@ -281,10 +281,7 @@ if (@contract3_entries) {
     printf $out3 "// Checked at runtime before 2-CP contraction lookup.\n";
     printf $out3 "//\n";
     printf $out3 "#define DUCET_CONTRACT3_COUNT %d\n\n", scalar @contract3_entries;
-    printf $out3 "static const struct {\n";
-    printf $out3 "    uint32_t cp1, cp2, cp3;\n";
-    printf $out3 "    unsigned short ce_index;\n";
-    printf $out3 "} ducet_contract3[%d] =\n{\n", scalar @contract3_entries;
+    printf $out3 "const utf_ducet_contract3 ducet_contract3[%d] =\n{\n", scalar @contract3_entries;
     for my $e (@contract3_entries) {
         printf $out3 "    { 0x%04X, 0x%04X, 0x%04X, %d },\n",
             $e->[0][0], $e->[0][1], $e->[0][2], $e->[1];
