@@ -4654,7 +4654,7 @@ static void test_collate_locales(void) {
         { "sv", "z", "\xC3\xA5", -1 },  /* z < å */
         { "sv", "\xC3\xA5", "\xC3\xA4", -1 },  /* å < ä */
         { "sv", "\xC3\xA4", "\xC3\xB6", -1 },  /* ä < ö */
-        { "sv", "\xC3\xA4b", "ab", 1 },  /* äb > ab */
+        { "sv", "\xC3\xA4" "b", "ab", 1 },  /* äb > ab */
         { "root", "\xC3\xA4", "b", -1 },  /* ä < b */
         { "de", "\xC3\xA4", "b", -1 },  /* ä < b */
         { "cs", "ch", "h", 1 },  /* ch > h */
